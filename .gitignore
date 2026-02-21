@@ -1,0 +1,31 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Google Cloud
+.gcloud/
+gcloud-service-key.json
+
+# Apps Script / clasp
+addon/.clasp.json   # contains script ID — don't expose publicly
+node_modules/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (never commit these)
+*.env
+secrets.json
+service_account.json

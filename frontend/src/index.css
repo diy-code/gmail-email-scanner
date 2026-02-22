@@ -1,0 +1,60 @@
+/* ═══════════════════════════════════════════════
+   Design tokens
+═══════════════════════════════════════════════ */
+:root {
+  --bg-base:      #060810;
+  --bg-surface:   #0d1117;
+  --bg-elevated:  #161b27;
+  --bg-input:     #0a0d16;
+  --border:       #1e2535;
+  --border-focus: #3b82f6;
+  --text-primary: #e2e8f0;
+  --text-secondary: #8b949e;
+  --text-muted:   #444d5c;
+
+  --safe:    #22c55e;
+  --warn:    #f59e0b;
+  --danger:  #ef4444;
+  --blue:    #3b82f6;
+  --indigo:  #6366f1;
+  --purple:  #a855f7;
+  --cyan:    #06b6d4;
+
+  --safe-bg:    rgba(34, 197, 94, 0.08);
+  --warn-bg:    rgba(245, 158, 11, 0.08);
+  --danger-bg:  rgba(239, 68, 68, 0.08);
+
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --radius-lg:  14px;
+  --radius-xl:  18px;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* ═══════════════════════════════════════════════
+   Reset
+═══════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; }
+body { background: var(--bg-base); color: var(--text-primary); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+button { cursor: pointer; font-family: inherit; }
+input, textarea, select { font-family: inherit; font-size: 14px; }
+a { color: var(--blue); }
+
+/* ═══════════════════════════════════════════════
+   Scrollbar
+═══════════════════════════════════════════════ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #2e3a52; }
+
+/* ═══════════════════════════════════════════════
+   Animations
+═══════════════════════════════════════════════ */
+@keyframes spin     { to { transform: rotate(360deg); } }
+@keyframes fadeIn   { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pulse    { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+@keyframes shimmer  { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+.animate-fadein { animation: fadeIn .35s ease both; }

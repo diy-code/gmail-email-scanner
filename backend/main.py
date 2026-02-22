@@ -100,7 +100,7 @@ def verify_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Health endpoint
+# Health endpoint (Decision D4)
 # ---------------------------------------------------------------------------
 
 @app.get("/health", response_model=HealthResponse)

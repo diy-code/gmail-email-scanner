@@ -17,8 +17,8 @@
       "name": "Email Security Scanner",
       "logoUrl": "https://www.gstatic.com/images/icons/material/system/2x/security_black_24dp.png",
       "layoutProperties": {
-        "primaryColor": "#1a73e8",
-        "secondaryColor": "#d93025"
+        "primaryColor": "#1A237E",
+        "secondaryColor": "#00C853"
       },
       "homepageTrigger": {
         "runFunction": "onHomepage"

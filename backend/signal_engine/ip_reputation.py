@@ -23,6 +23,45 @@ logger = logging.getLogger(__name__)
 
 ABUSEIPDB_CHECK_URL = "https://api.abuseipdb.com/api/v2/check"
 
+
+# ---------------------------------------------------------------------------
+# Tiered scoring based on number of reports
+# ---------------------------------------------------------------------------
+
+def _abuseipdb_tiered_points(total_reports: int, tier: str) -> tuple[int, str]:
+    """
+    Returns (points, severity) scaled by the number of distinct AbuseIPDB reports.
+
+    An IP reported by only 1-2 users is a weaker signal than one reported by
+    10+ users. This prevents a single spurious report from being treated the
+    same as broad community consensus.
+
+    tier='base' (confidence > 25%):
+        >= 10 reports -> 12 pts / high
+        3-9 reports   ->  8 pts / medium
+        1-2 reports   ->  4 pts / low
+
+    tier='bonus' (confidence > 75%, additive):
+        >= 10 reports -> 8 pts / critical
+        3-9 reports   -> 4 pts / high
+        1-2 reports   -> 2 pts / medium
+    """
+    if tier == "base":
+        if total_reports >= 10:
+            return 12, "high"
+        elif total_reports >= 3:
+            return 8, "medium"
+        else:
+            return 4, "low"
+    else:  # bonus
+        if total_reports >= 10:
+            return 8, "critical"
+        elif total_reports >= 3:
+            return 4, "high"
+        else:
+            return 2, "medium"
+
+
 # ---------------------------------------------------------------------------
 # Private/reserved IP ranges to ignore (Assumption A6)
 # ---------------------------------------------------------------------------
@@ -134,38 +173,46 @@ async def analyze_ip_reputation(
     try:
         data = resp.json()
         confidence = int(data["data"]["abuseConfidenceScore"])
+        total_reports = int(data["data"].get("totalReports", 0))
     except (KeyError, ValueError, TypeError) as exc:
         logger.warning("AbuseIPDB response parse error: %s", exc)
         parse_warnings.append(f"AbuseIPDB response parse error: {exc}")
         return signals, parse_warnings
 
-    logger.info("AbuseIPDB result: ip=%s confidence=%d%%", sender_ip, confidence)
+    logger.info(
+        "AbuseIPDB result: ip=%s confidence=%d%% totalReports=%d",
+        sender_ip, confidence, total_reports,
+    )
 
     if confidence > 25:
+        base_pts, base_sev = _abuseipdb_tiered_points(total_reports, "base")
         signals.append(Signal(
             name="AbuseIPDB: Sender IP Reported for Abuse",
             category="ip",
-            severity="high",
+            severity=base_sev,
             description=(
                 f"The sending IP address ({sender_ip}) has an AbuseIPDB confidence "
-                f"score of {confidence}%, indicating it has been reported for malicious activity."
+                f"score of {confidence}% with {total_reports} report(s), indicating it "
+                "has been reported for malicious activity."
             ),
-            value=f"{sender_ip} — confidence={confidence}%",
-            points=12,
+            value=f"{sender_ip} — confidence={confidence}%, reports={total_reports}",
+            points=base_pts,
         ))
 
     if confidence > 75:
         # Additive bonus for high-confidence abusive IPs (Assumption A4)
+        bonus_pts, bonus_sev = _abuseipdb_tiered_points(total_reports, "bonus")
         signals.append(Signal(
             name="AbuseIPDB: High-Confidence Abusive IP",
             category="ip",
-            severity="critical",
+            severity=bonus_sev,
             description=(
                 f"The sending IP ({sender_ip}) has an extremely high AbuseIPDB confidence "
-                f"score of {confidence}%, strongly indicating a known malicious sender."
+                f"score of {confidence}% with {total_reports} report(s), strongly indicating "
+                "a known malicious sender."
             ),
-            value=f"{sender_ip} — confidence={confidence}%",
-            points=8,
+            value=f"{sender_ip} — confidence={confidence}%, reports={total_reports}",
+            points=bonus_pts,
         ))
 
     return signals, parse_warnings

@@ -119,13 +119,16 @@ Analyzes up to 10 pre-extracted URLs from the email body.
 
 | Signal | Severity | Points | Trigger Condition |
 |--------|----------|--------|-------------------|
-| **VirusTotal: URL Flagged Malicious** | critical | 20 | ≥ 1 VT engine flags the URL's cached report as malicious |
+| **VirusTotal: URL Flagged Malicious** | critical | 20 | ≥ 10 VT engines flag the URL as malicious |
+| **VirusTotal: URL Flagged Malicious** | high | 12 | 3–9 VT engines flag the URL as malicious |
+| **VirusTotal: URL Flagged Malicious** | medium | 5 | 1–2 VT engines flag the URL as malicious |
 | **Safe Browsing: URL Flagged** | critical | 20 | Google Safe Browsing threat match (MALWARE, SOCIAL_ENGINEERING, UNWANTED_SOFTWARE, POTENTIALLY_HARMFUL) |
 | **URL Shortener Detected** | low | 5 | Domain matches known shortener list (bit.ly, tinyurl.com, t.co, etc.) |
 | **Typosquatted Domain** | high | 10 | URL domain is within Levenshtein distance ≤ 2 of a known brand domain |
 
 **Key decisions:**
 
+- **VirusTotal engine-count tiering**: The number of engines flagging a URL directly affects severity and points. 1–2 engines is treated as a weak signal (medium/5 pts) since it may be a false positive. 3–9 engines is moderate consensus (high/12 pts). Only ≥ 10 engines qualifies as critical (20 pts). This prevents a single engine’s false positive from dominating the score.
 - **VirusTotal rate limiting**: Free tier = 4 req/min, 500/day. To stay within budget, URLs are de-duplicated by domain and capped at `virustotal_max_domains` (default: 3) unique domains per request.
 - **VirusTotal uses cached lookups**: `GET /api/v3/urls/{id}` retrieves existing scan results — it does NOT submit for a new scan. This avoids burning quota on active scanning.
 - **Safe Browsing batching**: All URLs are checked in a single POST request (batch API). An empty response `{}` — not a 404 — means "no threats found."
@@ -140,12 +143,17 @@ Extracts the sender IP from `Received` headers and queries AbuseIPDB.
 
 | Signal | Severity | Points | Trigger Condition |
 |--------|----------|--------|-------------------|
-| **AbuseIPDB: Sender IP Reported for Abuse** | high | 12 | AbuseIPDB confidence score > 25% |
-| **AbuseIPDB: High-Confidence Abusive IP** | critical | 8 | AbuseIPDB confidence score > 75% *(additive to above)* |
+| **AbuseIPDB: Sender IP Reported for Abuse** | high | 12 | Confidence > 25% AND ≥ 10 reports |
+| **AbuseIPDB: Sender IP Reported for Abuse** | medium | 8 | Confidence > 25% AND 3–9 reports |
+| **AbuseIPDB: Sender IP Reported for Abuse** | low | 4 | Confidence > 25% AND 1–2 reports |
+| **AbuseIPDB: High-Confidence Abusive IP** | critical | 8 | Confidence > 75% AND ≥ 10 reports *(additive)* |
+| **AbuseIPDB: High-Confidence Abusive IP** | high | 4 | Confidence > 75% AND 3–9 reports *(additive)* |
+| **AbuseIPDB: High-Confidence Abusive IP** | medium | 2 | Confidence > 75% AND 1–2 reports *(additive)* |
 
 **Key decisions:**
 
-- **Additive thresholds** (not mutually exclusive): If `confidence > 75%`, **both** signals fire for a total of 20 pts (12 + 8). This is by design — a 76% confidence IP is significantly worse than a 26% one and deserves the full cap.
+- **Report-count tiering**: The number of distinct users who reported the IP scales the points. A single report (1–2 users) is treated as a weak signal to avoid false positives from one abusive reporter. 3–9 reports indicate moderate community consensus. ≥ 10 reports represent strong consensus and earn full points.
+- **Additive thresholds** (not mutually exclusive): If `confidence > 75%`, **both** signals fire. Maximum total with ≥ 10 reports = 12 + 8 = 20 pts (fills the cap). With only 1–2 reports, total = 4 + 2 = 6 pts.
 - **First external IP, not last**: The engine scans `Received` headers outermost-first and returns the first IP not in a private/reserved range (RFC 1918, link-local, loopback, ULA). The last hop is typically an internal Google relay — not the actual sender.
 - **Private IP filtering**: Addresses in `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`, `::1/128`, `fc00::/7` are silently skipped.
 
@@ -157,8 +165,12 @@ Checks how recently the sender's domain was registered and its VirusTotal reputa
 
 | Signal | Severity | Points | Trigger Condition |
 |--------|----------|--------|-------------------|
-| **VirusTotal: Malicious Domain** | critical | 20 | ≥ 1 VT engine flags domain as malicious |
-| **VirusTotal: Suspicious Domain** | high | 10 | ≥ 1 VT engine flags domain as suspicious (and 0 malicious) |
+| **VirusTotal: Malicious Domain** | critical | 20 | ≥ 10 VT engines flag domain as malicious |
+| **VirusTotal: Malicious Domain** | high | 12 | 3–9 VT engines flag domain as malicious |
+| **VirusTotal: Malicious Domain** | medium | 5 | 1–2 VT engines flag domain as malicious |
+| **VirusTotal: Suspicious Domain** | high | 10 | ≥ 10 VT engines flag domain as suspicious (and 0 malicious) |
+| **VirusTotal: Suspicious Domain** | medium | 6 | 3–9 VT engines flag domain as suspicious (and 0 malicious) |
+| **VirusTotal: Suspicious Domain** | low | 3 | 1–2 VT engines flag domain as suspicious (and 0 malicious) |
 | **Domain: Complete Authentication Failure** | critical | 20 | SPF ∈ {fail, softfail} AND DKIM ∈ {fail, none} AND DMARC = fail — all three fail simultaneously |
 | **Very New Domain (< 7 days)** | critical | 20 | WHOIS creation date < 7 days ago |
 | **New Domain (< 30 days)** | high | 12 | WHOIS creation date < 30 days ago (and ≥ 7 days) |
@@ -388,8 +400,8 @@ PEP 563 deferred evaluation breaks Pydantic v2's route-parameter resolution. Ann
 ### A3 — Mutually exclusive domain age thresholds
 A domain that is 3 days old fires the `< 7 days` signal (20 pts) only — not both `< 7 days` AND `< 30 days`. This prevents double-counting identical data.
 
-### A4 — Additive AbuseIPDB thresholds
-Unlike domain age, IP reputation thresholds ARE additive. A confidence of 80% fires both the > 25% signal (12 pts) and > 75% bonus (8 pts) for 20 pts total. Rationale: the jump from 26% to 76% represents a qualitative difference in threat level that warrants extra weight.
+### A4 — Additive AbuseIPDB thresholds (report-count-aware)
+Unlike domain age, IP reputation thresholds ARE additive. A confidence of 80% fires both the > 25% signal and > 75% bonus. However, the points now scale with `totalReports`: ≥ 10 reports earns full points (12 + 8 = 20), 3–9 reports earns moderate points (8 + 4 = 12), and 1–2 reports earns reduced points (4 + 2 = 6). Rationale: a single spurious reporter should not produce the same score as broad community consensus.
 
 ### A6 — First external IP, not last
 Email `Received` headers are stacked top-down as the message traverses servers. The first non-private IP is the originating external server — the actual sender. The last hop is usually a Google internal relay and would be meaningless to query.
@@ -408,14 +420,14 @@ The full email body is never sent to GPT-4o. Only signal metadata and short matc
 | 3 | DMARC Fail | header | high | 15 | Auth-Results header | `dmarc=fail` |
 | 4 | Reply-To Domain Mismatch | header | medium | 8 | From + Reply-To headers | Different domains |
 | 5 | Display Name Spoofing | header | high | 10 | From header | Brand name in display, wrong domain |
-| 6 | VirusTotal: URL Flagged Malicious | url | critical | 20 | VirusTotal API | ≥ 1 engine flags URL |
+| 6 | VirusTotal: URL Flagged Malicious | url | critical/high/medium | 20/12/5 | VirusTotal API | ≥10 / 3–9 / 1–2 engines flag URL |
 | 7 | Safe Browsing: URL Flagged | url | critical | 20 | Google Safe Browsing | Threat match found |
 | 8 | URL Shortener Detected | url | low | 5 | Regex domain match | Known shortener domain |
 | 9 | Typosquatted Domain | url | high | 10 | rapidfuzz Levenshtein | Distance ≤ 2 to brand domain |
-| 10 | AbuseIPDB: Sender IP Reported | ip | high | 12 | AbuseIPDB API | Confidence > 25% |
-| 11 | AbuseIPDB: High-Confidence Abusive IP | ip | critical | 8 | AbuseIPDB API | Confidence > 75% (additive) |
-| 12 | VirusTotal: Malicious Domain | domain | critical | 20 | VirusTotal Domain API | ≥ 1 engine flags malicious |
-| 13 | VirusTotal: Suspicious Domain | domain | high | 10 | VirusTotal Domain API | ≥ 1 engine flags suspicious |
+| 10 | AbuseIPDB: Sender IP Reported | ip | high/medium/low | 12/8/4 | AbuseIPDB API | Confidence > 25%, scaled by totalReports (≥10 / 3–9 / 1–2) |
+| 11 | AbuseIPDB: High-Confidence Abusive IP | ip | critical/high/medium | 8/4/2 | AbuseIPDB API | Confidence > 75% (additive), scaled by totalReports |
+| 12 | VirusTotal: Malicious Domain | domain | critical/high/medium | 20/12/5 | VirusTotal Domain API | ≥10 / 3–9 / 1–2 engines flag malicious |
+| 13 | VirusTotal: Suspicious Domain | domain | high/medium/low | 10/6/3 | VirusTotal Domain API | ≥10 / 3–9 / 1–2 engines flag suspicious |
 | 14 | Domain: Complete Auth Failure | domain | critical | 20 | Auth-Results header | SPF+DKIM+DMARC all fail |
 | 15 | Very New Domain (< 7 days) | domain | critical | 20 | WHOIS | Created < 7 days ago |
 | 16 | New Domain (< 30 days) | domain | high | 12 | WHOIS | Created 7–29 days ago |

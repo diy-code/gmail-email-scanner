@@ -27,6 +27,44 @@ logger = logging.getLogger(__name__)
 VIRUSTOTAL_DOMAIN_URL = "https://www.virustotal.com/api/v3/domains"
 
 
+# ---------------------------------------------------------------------------
+# Tiered severity for engine-count-based scoring
+# ---------------------------------------------------------------------------
+
+def _vt_domain_tiered_severity(
+    count: int,
+    kind: str,
+) -> tuple[str, int]:
+    """
+    Returns (severity, points) scaled by how many VirusTotal engines flagged
+    the domain.
+
+    For 'malicious':
+        >= 10 engines -> critical / 20 pts
+        3-9 engines   -> high     / 12 pts
+        1-2 engines   -> medium   /  5 pts
+
+    For 'suspicious':
+        >= 10 engines -> high   / 10 pts
+        3-9 engines   -> medium /  6 pts
+        1-2 engines   -> low    /  3 pts
+    """
+    if kind == "malicious":
+        if count >= 10:
+            return "critical", 20
+        elif count >= 3:
+            return "high", 12
+        else:
+            return "medium", 5
+    else:  # suspicious
+        if count >= 10:
+            return "high", 10
+        elif count >= 3:
+            return "medium", 6
+        else:
+            return "low", 3
+
+
 async def _check_virustotal_domain(
     domain: str,
     availability_flags: dict[str, bool],
@@ -88,28 +126,30 @@ async def _check_virustotal_domain(
         )
 
         if malicious_count > 0:
+            severity, points = _vt_domain_tiered_severity(malicious_count, "malicious")
             return Signal(
                 name="VirusTotal: Malicious Domain",
                 category="domain",
-                severity="critical",
+                severity=severity,
                 description=(
                     f"{malicious_count} out of {total} security engines flagged the sender "
                     f"domain \'{domain}\' as malicious."
                 ),
                 value=f"{domain}: {malicious_count}/{total} engines flagged malicious",
-                points=20,
+                points=points,
             )
         elif suspicious_count > 0:
+            severity, points = _vt_domain_tiered_severity(suspicious_count, "suspicious")
             return Signal(
                 name="VirusTotal: Suspicious Domain",
                 category="domain",
-                severity="high",
+                severity=severity,
                 description=(
                     f"{suspicious_count} out of {total} security engines flagged the sender "
                     f"domain \'{domain}\' as suspicious."
                 ),
                 value=f"{domain}: {suspicious_count}/{total} engines flagged suspicious",
-                points=10,
+                points=points,
             )
     except (KeyError, ValueError) as exc:
         logger.warning("[VT-domain] Response parse error for domain=%s: %s", domain, exc)

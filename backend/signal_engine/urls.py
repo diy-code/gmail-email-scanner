@@ -48,6 +48,26 @@ SAFE_BROWSING_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 
 
 # ---------------------------------------------------------------------------
+# Tiered severity for engine-count-based scoring
+# ---------------------------------------------------------------------------
+
+def _vt_tiered_severity(malicious_count: int) -> tuple[str, int]:
+    """
+    Returns (severity, points) scaled by the number of VirusTotal engines
+    that flagged the URL/domain as malicious.
+
+    Rationale: 1-2 engines flagging is a weak signal (possible false positive),
+    3-9 is moderate consensus, >= 10 is strong consensus.
+    """
+    if malicious_count >= 10:
+        return "critical", 20
+    elif malicious_count >= 3:
+        return "high", 12
+    else:
+        return "medium", 5
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -136,15 +156,16 @@ async def _check_virustotal(url: str, client: httpx.AsyncClient) -> Optional[Sig
         total = sum(stats.values())
 
         if malicious_count > 0:
+            severity, points = _vt_tiered_severity(malicious_count)
             return Signal(
                 name="VirusTotal: URL Flagged Malicious",
                 category="url",
-                severity="critical",
+                severity=severity,
                 description=(
                     f"{malicious_count} out of {total} security engines flagged this URL as malicious."
                 ),
                 value=f"{malicious_count}/{total} engines",
-                points=20,
+                points=points,
             )
     except (KeyError, ValueError) as exc:
         logger.warning("VirusTotal response parse error: %s", exc)

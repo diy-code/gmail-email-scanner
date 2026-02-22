@@ -124,6 +124,12 @@ class AnalyzeResponse(BaseModel):
     # --- AI narrative ---
     explanation: str                       # GPT-4o generated text (or template fallback)
 
+    # --- Source availability (Feature D: confidence breakdown) ---
+    source_availability: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Which external APIs were reachable: virustotal, safe_browsing, abuseipdb, whois",
+    )
+
     # --- Observability ---
     analysis_time_ms: int                  # wall-clock time for the full analysis
 

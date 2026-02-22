@@ -106,7 +106,7 @@ def verify_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
 @app.get("/health", response_model=HealthResponse)
 async def health():
     """Liveness probe. Called by UptimeRobot and before demo to warm Cloud Run."""
-    return HealthResponse(status="ok", version=settings.app_version)
+    return HealthResponse(status="ok - healthy", version=settings.app_version)
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +244,7 @@ async def analyze(
         evidence=evidence,
         scoring_breakdown=breakdown,
         explanation=explanation,
+        source_availability=availability,
         analysis_time_ms=analysis_time_ms,
     )
 

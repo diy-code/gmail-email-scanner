@@ -154,9 +154,17 @@ class TestAnalyzeResponseSchema:
         required = {
             "request_id", "score", "verdict", "confidence", "confidence_label",
             "signals", "top_contributors", "evidence", "scoring_breakdown",
-            "explanation", "analysis_time_ms",
+            "explanation", "source_availability", "analysis_time_ms",
         }
         assert required.issubset(data.keys())
+
+    async def test_source_availability_is_dict(self, client):
+        resp = await client.post("/analyze", json=MINIMAL_PAYLOAD)
+        sa = resp.json()["source_availability"]
+        assert isinstance(sa, dict)
+        for key in ("virustotal", "safe_browsing", "abuseipdb", "whois"):
+            assert key in sa
+            assert isinstance(sa[key], bool)
 
     async def test_request_id_is_valid_uuid4(self, client):
         resp = await client.post("/analyze", json=MINIMAL_PAYLOAD)

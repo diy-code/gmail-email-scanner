@@ -409,6 +409,19 @@ Email `Received` headers are stacked top-down as the message traverses servers. 
 ### A8 — Privacy: signal summaries only to OpenAI
 The full email body is never sent to GPT-4o. Only signal metadata and short matched urgency phrases are included in the prompt. This limits exposure while still enabling useful narrative generation.
 
+### A9 — Attachment scanning intentionally omitted
+Attachment analysis was considered and explicitly deprioritized for the following reasons:
+
+1. **Static metadata offers negligible security value.** Checking file extensions (e.g., flagging `.exe`) is trivially bypassed by renaming the file. A `.exe` renamed to `.pdf` defeats the check entirely, so this approach would create false confidence without real protection.
+
+2. **VirusTotal file hash lookup competes with existing quota.** The free VirusTotal tier allows 4 req/min and 500/day. Each `/analyze` call already consumes up to 4 requests (3 URL scans + 1 domain lookup). Adding file hash queries would require either dropping URL/domain coverage or exceeding the free quota — both unacceptable trade-offs for a signal that only matches *known* malware hashes. Novel or slightly modified payloads would go undetected regardless.
+
+3. **Dynamic sandbox analysis (e.g., Any.run, Hybrid Analysis) is out of scope.** Full behavioral analysis of attachments requires executing the file in an isolated VM environment. This introduces significant infrastructure complexity, multi-second (often 30–120s) latency per scan, and per-scan cost completely unsuitable for a real-time Gmail sidebar. It would also require the add-on to upload attachment bytes to a third-party service, raising serious privacy concerns with no user consent mechanism in place.
+
+4. **The existing signal coverage already catches attachment-based phishing indirectly.** Emails distributing malicious attachments almost always fail authentication (SPF/DKIM/DMARC), originate from new or abusive domains, contain urgency language, and include suspicious URLs. These signals collectively produce a high score without needing to inspect the file itself.
+
+**Upgrade path for production**: A production implementation would integrate VirusTotal's file submission endpoint (`POST /api/v3/files`) for known file types, gate it behind a user opt-in consent flow for privacy compliance, and apply a separate rate-limit budget independent of the URL scanning quota.
+
 ---
 
 ## 10. Complete Signal Reference Table

@@ -1,27 +1,28 @@
 /**
- * Cards.gs v3 \u2014 "Sentinel" design system
+ * Cards.gs v4 — "Sentinel" design system
  *
  * Aesthetic: Industrial security terminal. Terse. Decisive. Color-coded.
  * Every pixel of data earns its place or gets cut.
  *
  * Architecture (matching Code.gs contract):
- *   buildHomepageCard()                   \u2192 onHomepage()
- *   buildInitialCard(subject, sender, id) \u2192 onGmailMessageOpen()
- *   buildResultCard(result)               \u2192 analyzeEmail() success
- *   buildErrorCard(message, detail)       \u2192 analyzeEmail() failure
+ *   buildHomepageCard(history, autoScan, blacklist) → onHomepage()
+ *   buildInitialCard(subject, sender, id)           → onGmailMessageOpen()
+ *   buildResultCard(result, sender)                 → analyzeEmail() success
+ *   buildErrorCard(message, detail)                 → analyzeEmail() failure
+ *   buildBlockedCard(domain)                        → blockSender() confirmation
  *
  * CardService features used:
- *   MaterialIcon \u00B7 DecoratedText \u00B7 TextParagraph \u00B7 Columns
- *   Divider \u00B7 FixedFooter \u00B7 Collapsible sections \u00B7 HTML formatting
+ *   MaterialIcon · DecoratedText · TextParagraph · Columns
+ *   Divider · FixedFooter · Collapsible sections · HTML formatting
  *
- * Constraints: ES5 only \u00B7 ~300px sidebar \u00B7 CardHeader requires URL icons
+ * Constraints: ES5 only · ~300px sidebar · CardHeader requires URL icons
  * HTML subset: <b> <i> <u> <s> <font color> <a href> <br>
  */
 
 
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// ═══════════════════════════════════════════════════════════
 //  DESIGN TOKENS
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// ═══════════════════════════════════════════════════════════
 
 var C = {
   SAFE:    '#00C853',   // electric green
@@ -44,16 +45,16 @@ var HDR = {
   ERR:      'https://www.gstatic.com/images/icons/material/system/2x/error_black_24dp.png'
 };
 
-// Verdict \u2192 display config
+// Verdict → display config
 var V_IMG    = { SAFE: HDR.VERIFIED, SUSPICIOUS: HDR.WARN, MALICIOUS: HDR.DANGER };
 var V_COLOR  = { SAFE: C.SAFE, SUSPICIOUS: C.WARN, MALICIOUS: C.DANGER };
 var V_MI     = { SAFE: 'verified_user', SUSPICIOUS: 'warning', MALICIOUS: 'dangerous' };
 
 var V_TITLE  = { SAFE: 'CLEAR', SUSPICIOUS: 'CAUTION', MALICIOUS: 'HOSTILE' };
 var V_SUB    = {
-  SAFE:       'All signals nominal \u2014 no threats detected',
-  SUSPICIOUS: 'Anomalies detected \u2014 exercise caution',
-  MALICIOUS:  'Active threat indicators \u2014 do not engage'
+  SAFE:       'All signals nominal — no threats detected',
+  SUSPICIOUS: 'Anomalies detected — exercise caution',
+  MALICIOUS:  'Active threat indicators — do not engage'
 };
 var V_ACTION = {
   SAFE:       'No action required. This email appears legitimate.',
@@ -84,23 +85,36 @@ var ICO = {
   speed:         'https://www.gstatic.com/images/icons/material/system/2x/speed_black_24dp.png',
   bug_report:    'https://www.gstatic.com/images/icons/material/system/2x/bug_report_black_24dp.png',
   verified_user: 'https://www.gstatic.com/images/icons/material/system/2x/verified_user_black_24dp.png',
-  security:      'https://www.gstatic.com/images/icons/material/system/2x/security_black_24dp.png'
+  security:      'https://www.gstatic.com/images/icons/material/system/2x/security_black_24dp.png',
+  history:       'https://www.gstatic.com/images/icons/material/system/2x/history_black_24dp.png',
+  settings:      'https://www.gstatic.com/images/icons/material/system/2x/settings_black_24dp.png',
+  toggle_on:     'https://www.gstatic.com/images/icons/material/system/2x/toggle_on_black_24dp.png',
+  toggle_off:    'https://www.gstatic.com/images/icons/material/system/2x/toggle_off_black_24dp.png',
+  delete:        'https://www.gstatic.com/images/icons/material/system/2x/delete_black_24dp.png'
 };
 
 // Category config
 var CAT = {
-  header:   { lbl: 'AUTH',     desc: 'SPF \u00B7 DKIM \u00B7 DMARC',          mi: 'fingerprint',    cap: 45 },
-  url:      { lbl: 'URLS',     desc: 'VirusTotal \u00B7 Safe Browsing',        mi: 'link',           cap: 40 },
-  ip:       { lbl: 'IP REP',   desc: 'AbuseIPDB confidence score',             mi: 'dns',            cap: 20 },
-  domain:   { lbl: 'DOMAIN',   desc: 'Registration age analysis',              mi: 'event',          cap: 20 },
-  behavior: { lbl: 'BEHAVIOR', desc: 'Social engineering cues',                mi: 'visibility',     cap: 10 }
+  header:   { lbl: 'AUTH',     desc: 'SPF · DKIM · DMARC',          mi: 'fingerprint',    cap: 45 },
+  url:      { lbl: 'URLS',     desc: 'VirusTotal · Safe Browsing',   mi: 'link',           cap: 40 },
+  ip:       { lbl: 'IP REP',   desc: 'AbuseIPDB confidence score',   mi: 'dns',            cap: 20 },
+  domain:   { lbl: 'DOMAIN',   desc: 'Registration age analysis',    mi: 'event',          cap: 20 },
+  behavior: { lbl: 'BEHAVIOR', desc: 'Social engineering cues',      mi: 'visibility',     cap: 10 }
 };
 var CAT_ORDER = ['header', 'url', 'ip', 'domain', 'behavior'];
 
+// Confidence penalties (must match backend scoring.py CONFIDENCE_PENALTIES)
+var CONF_PENALTIES = {
+  virustotal:    { label: 'VirusTotal',      pts: 20 },
+  safe_browsing: { label: 'Safe Browsing',   pts: 15 },
+  abuseipdb:     { label: 'AbuseIPDB',       pts: 10 },
+  whois:         { label: 'WHOIS',           pts: 10 }
+};
 
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+// ═══════════════════════════════════════════════════════════
 //  CORE HELPERS
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// ═══════════════════════════════════════════════════════════
 
 /** Icon by name — uses URL-based icons for universal compatibility. */
 function mi(name) {
@@ -117,14 +131,14 @@ function fc(t, c) { return '<font color="' + c + '">' + t + '</font>'; }
 /** Bold + colored. */
 function bc(t, c) { return '<font color="' + c + '"><b>' + t + '</b></font>'; }
 
-/** Score 0-100 \u2192 threat color. */
+/** Score 0-100 → threat color. */
 function sColor(score) {
   if (score <= 25) return C.SAFE;
   if (score <= 55) return C.WARN;
   return C.DANGER;
 }
 
-/** Severity string \u2192 color hex. */
+/** Severity string → color hex. */
 function sevColor(sev) {
   switch ((sev || '').toLowerCase()) {
     case 'critical': return C.CRIT;
@@ -135,7 +149,7 @@ function sevColor(sev) {
   }
 }
 
-/** Severity \u2192 icon name (maps to ICO keys). */
+/** Severity → icon name (maps to ICO keys). */
 function sevMi(sev) {
   switch ((sev || '').toLowerCase()) {
     case 'critical': return 'dangerous';
@@ -146,50 +160,172 @@ function sevMi(sev) {
   }
 }
 
-/** HTML colored severity badge: \u25CF CRITICAL etc. */
+/** HTML colored severity badge: ● CRITICAL etc. */
 function sevTag(sev) {
   var s = (sev || '').toLowerCase();
   var label = (s === 'critical' || s === 'high' || s === 'medium' || s === 'low')
     ? s.toUpperCase() : 'INFO';
-  return bc('\u25CF ' + label, sevColor(sev));
+  return bc('● ' + label, sevColor(sev));
 }
 
 /** 20-char Unicode score bar with finer resolution than 10-char. */
 function scoreBar(score) {
   var n = Math.round(score / 5);
   var bar = '';
-  for (var i = 0; i < n; i++) bar += '\u2588';
-  for (var j = 0; j < 20 - n; j++) bar += '\u2591';
+  for (var i = 0; i < n; i++) bar += '█';
+  for (var j = 0; j < 20 - n; j++) bar += '░';
   return bar;
 }
 
-/** Points \u2192 color based on ratio to cap. */
+/** Points → color based on ratio to cap. */
 function ptColor(pts, cap) {
   if (cap === 0) return C.MUTE;
   var r = pts / cap;
   return r < 0.25 ? C.SAFE : r < 0.5 ? C.WARN : C.DANGER;
 }
 
+/** Relative time string: "2h ago", "3d ago", "just now". */
+function relativeTime(isoString) {
+  try {
+    var then = new Date(isoString);
+    var now  = new Date();
+    var diff = Math.floor((now.getTime() - then.getTime()) / 1000);
+    if (diff < 60)    return 'just now';
+    if (diff < 3600)  return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  } catch (_) {
+    return '';
+  }
+}
 
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-//  HOMEPAGE CARD
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 
-function buildHomepageCard() {
+// ═══════════════════════════════════════════════════════════
+//  HOMEPAGE CARD (with history, auto-scan toggle, blacklist)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * @param {Array}   history        - Array of scan history items (newest first).
+ * @param {boolean} autoScanEnabled - Whether auto-scan mode is active.
+ * @param {Array}   blacklist      - Array of blocked domain strings.
+ * @return {Card}
+ */
+function buildHomepageCard(history, autoScanEnabled, blacklist) {
+  history   = history   || [];
+  blacklist = blacklist || [];
+
   var header = CardService.newCardHeader()
     .setTitle('SENTINEL')
     .setSubtitle('Email Threat Intelligence')
     .setImageUrl(HDR.SHIELD)
     .setImageStyle(CardService.ImageStyle.CIRCLE);
 
-  var intro = CardService.newCardSection()
-    .addWidget(CardService.newTextParagraph().setText(
-      b('Open any email') + ' to initiate a threat scan.' + '<br><br>' +
-      fc('Five signal engines analyze each message in parallel. ' +
-      'Results include a composite threat score, confidence rating, ' +
-      'and AI-generated risk narrative.', C.MUTE)
-    ));
+  // ── Settings section (auto-scan toggle) ───────────────
+  var settingsSec = CardService.newCardSection()
+    .setHeader('SETTINGS');
 
+  var toggleBtn = CardService.newTextButton()
+    .setText(autoScanEnabled ? 'DISABLE' : 'ENABLE')
+    .setOnClickAction(CardService.newAction().setFunctionName('toggleAutoScan'))
+    .setTextButtonStyle(CardService.TextButtonStyle.FILLED);
+
+  settingsSec.addWidget(
+    CardService.newDecoratedText()
+      .setTopLabel('AUTO-SCAN')
+      .setText(bc(autoScanEnabled ? 'ENABLED' : 'DISABLED', autoScanEnabled ? C.SAFE : C.MUTE))
+      .setBottomLabel('Analyze every email automatically on open')
+      .setStartIcon(mi(autoScanEnabled ? 'toggle_on' : 'toggle_off'))
+      .setButton(toggleBtn)
+  );
+
+  // ── Recent scans section ──────────────────────────────
+  var historySec = CardService.newCardSection()
+    .setHeader('RECENT SCANS');
+
+  if (history.length === 0) {
+    historySec.addWidget(
+      CardService.newTextParagraph().setText(
+        fc('No scans yet — open an email to begin.', C.MUTE)
+      )
+    );
+  } else {
+    // Stats summary
+    var totalScans = history.length;
+    var malCount = 0;
+    var susCount = 0;
+    for (var h = 0; h < history.length; h++) {
+      if (history[h].verdict === 'MALICIOUS')  malCount++;
+      if (history[h].verdict === 'SUSPICIOUS') susCount++;
+    }
+    var statsText = b('' + totalScans) + fc(' scanned', C.MUTE);
+    if (malCount > 0) statsText += '  ·  ' + bc('' + malCount + ' threats', C.DANGER);
+    if (susCount > 0) statsText += '  ·  ' + bc('' + susCount + ' suspicious', C.WARN);
+    historySec.addWidget(
+      CardService.newTextParagraph().setText(statsText)
+    );
+
+    // Individual entries (max 7 shown)
+    var showCount = Math.min(history.length, 7);
+    for (var i = 0; i < showCount; i++) {
+      var item = history[i];
+      var itemColor = V_COLOR[item.verdict] || C.MUTE;
+      historySec.addWidget(CardService.newDivider());
+      historySec.addWidget(
+        CardService.newDecoratedText()
+          .setTopLabel(
+            bc(item.verdict || 'UNKNOWN', itemColor) +
+            fc('  ·  Score: ' + (item.score != null ? item.score : '?'), C.MUTE)
+          )
+          .setText((item.sender || '').substring(0, 60))
+          .setBottomLabel(
+            (item.subject || '').substring(0, 50) +
+            '  ·  ' + relativeTime(item.ts)
+          )
+          .setWrapText(true)
+          .setStartIcon(mi(V_MI[item.verdict] || 'info'))
+      );
+    }
+    if (history.length > 7) {
+      historySec.addWidget(
+        CardService.newTextParagraph().setText(
+          fc('… and ' + (history.length - 7) + ' more', C.MUTE)
+        )
+      );
+    }
+  }
+
+  // ── Blacklist section ─────────────────────────────────
+  var blSec = CardService.newCardSection()
+    .setHeader('BLOCKED DOMAINS (' + blacklist.length + ')')
+    .setCollapsible(true)
+    .setNumUncollapsibleWidgets(0);
+
+  if (blacklist.length === 0) {
+    blSec.addWidget(
+      CardService.newTextParagraph().setText(
+        fc('No blocked domains. Use the "BLOCK SENDER" button on scan results to add entries.', C.MUTE)
+      )
+    );
+  } else {
+    for (var bl = 0; bl < blacklist.length; bl++) {
+      var dom = blacklist[bl];
+      var unblockBtn = CardService.newTextButton()
+        .setText('UNBLOCK')
+        .setOnClickAction(
+          CardService.newAction()
+            .setFunctionName('unblockSender')
+            .setParameters({ 'domain': dom })
+        );
+      blSec.addWidget(
+        CardService.newDecoratedText()
+          .setText(bc(dom, C.DANGER))
+          .setStartIcon(mi('block'))
+          .setButton(unblockBtn)
+      );
+    }
+  }
+
+  // ── Engine listing ────────────────────────────────────
   var engines = [
     { n: 'fingerprint',    t: 'Authentication',      d: 'SPF, DKIM, DMARC header validation' },
     { n: 'link',           t: 'URL Intelligence',    d: 'VirusTotal & Google Safe Browsing' },
@@ -198,28 +334,33 @@ function buildHomepageCard() {
     { n: 'visibility',     t: 'Behavioral Signals',  d: 'Urgency & social engineering patterns' }
   ];
 
-  var engSec = CardService.newCardSection().setHeader('THREAT INTEL ENGINES');
-  for (var i = 0; i < engines.length; i++) {
-    if (i > 0) engSec.addWidget(CardService.newDivider());
+  var engSec = CardService.newCardSection()
+    .setHeader('THREAT INTEL ENGINES')
+    .setCollapsible(true)
+    .setNumUncollapsibleWidgets(0);
+  for (var e = 0; e < engines.length; e++) {
+    if (e > 0) engSec.addWidget(CardService.newDivider());
     engSec.addWidget(
       CardService.newDecoratedText()
-        .setText(b(engines[i].t))
-        .setBottomLabel(engines[i].d)
-        .setStartIcon(mi(engines[i].n))
+        .setText(b(engines[e].t))
+        .setBottomLabel(engines[e].d)
+        .setStartIcon(mi(engines[e].n))
     );
   }
 
   return CardService.newCardBuilder()
     .setHeader(header)
-    .addSection(intro)
+    .addSection(settingsSec)
+    .addSection(historySec)
+    .addSection(blSec)
     .addSection(engSec)
     .build();
 }
 
 
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// ═══════════════════════════════════════════════════════════
 //  INITIAL CARD (pre-scan)
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// ═══════════════════════════════════════════════════════════
 
 /**
  * @param {string} subject   - Email subject line.
@@ -255,7 +396,7 @@ function buildInitialCard(subject, sender, messageId) {
   var brief = CardService.newCardSection()
     .addWidget(CardService.newTextParagraph().setText(
       fc('Scans authentication headers, URLs, sender IP, domain age, ' +
-      'and behavioral patterns. Typical analysis: 2\u20134 seconds.', C.MUTE)
+      'and behavioral patterns. Typical analysis: 2–4 seconds.', C.MUTE)
     ));
 
   var footer = CardService.newFixedFooter()
@@ -275,23 +416,25 @@ function buildInitialCard(subject, sender, messageId) {
 }
 
 
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// ═══════════════════════════════════════════════════════════
 //  RESULT CARD
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// ═══════════════════════════════════════════════════════════
 
 /**
- * Sections (visible \u2192 progressive disclosure):
- *   \u00A71  Score + Action    \u2014 hero metrics, colored bar, directive
- *   \u00A72  Threat Intel      \u2014 top contributors + AI narrative
- *   \u00A73  Signal Grid       \u2014 per-category breakdown (collapsible)
- *   \u00A74  Evidence Chain    \u2014 raw evidence items (collapsible)
- *   \u00A75  All Signals       \u2014 every signal fired (collapsible)
- *   \u00A76  Forensics         \u2014 request ID + timing (collapsible)
+ * Sections (visible → progressive disclosure):
+ *   §1  Score + Action    — hero metrics, colored bar, directive
+ *   §2  Threat Intel      — top contributors + AI narrative + block button
+ *   §3  Signal Grid       — per-category breakdown (collapsible)
+ *   §4  Evidence Chain    — raw evidence items (collapsible)
+ *   §5  All Signals       — every signal fired (collapsible)
+ *   §6  Confidence Detail — source availability breakdown (collapsible)
+ *   §7  Forensics         — request ID + timing (collapsible)
  *
  * @param {Object} result - AnalyzeResponse JSON from backend.
+ * @param {string} [sender] - Full sender string (for block button).
  * @return {Card}
  */
-function buildResultCard(result) {
+function buildResultCard(result, sender) {
   var verdict     = result.verdict         || 'UNKNOWN';
   var score       = result.score           != null ? result.score : 0;
   var confidence  = result.confidence      != null ? result.confidence : 0;
@@ -303,18 +446,19 @@ function buildResultCard(result) {
   var breakdown   = result.scoring_breakdown || {};
   var requestId   = result.request_id      || '';
   var timing      = result.analysis_time_ms || 0;
+  var srcAvail    = result.source_availability || {};
 
   var vc = V_COLOR[verdict] || C.MUTE;
   var sc = sColor(score);
 
-  // \u2500\u2500 Header \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // ── Header ────────────────────────────────────────────
   var header = CardService.newCardHeader()
     .setTitle(V_TITLE[verdict] || verdict)
     .setSubtitle(V_SUB[verdict] || 'Analysis complete')
     .setImageUrl(V_IMG[verdict] || HDR.SHIELD)
     .setImageStyle(CardService.ImageStyle.CIRCLE);
 
-  // \u2500\u2500 \u00A71: Score + Action \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // ── §1: Score + Action ───────────────────────────────
   var scoreSec = CardService.newCardSection();
 
   // Columns: threat score | confidence
@@ -352,7 +496,7 @@ function buildResultCard(result) {
       CardService.newDecoratedText()
         .setTopLabel('THREAT SCORE')
         .setText(bc(score + ' / 100', sc))
-        .setBottomLabel('Confidence: ' + confidence + '% \u00B7 ' + confLabel)
+        .setBottomLabel('Confidence: ' + confidence + '% · ' + confLabel)
         .setStartIcon(mi(V_MI[verdict] || 'security'))
     );
   }
@@ -373,7 +517,7 @@ function buildResultCard(result) {
       .setStartIcon(mi(V_ACT_ICON[verdict] || 'info'))
   );
 
-  // \u2500\u2500 \u00A72: Threat Intel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // ── §2: Threat Intel ──────────────────────────────────
   var threatSec = CardService.newCardSection()
     .setHeader('THREAT INTEL');
 
@@ -382,7 +526,7 @@ function buildResultCard(result) {
       CardService.newDecoratedText()
         .setText(
           bc('ALL CLEAR', C.SAFE) +
-          fc(' \u2014 no risk indicators triggered', C.MUTE)
+          fc(' — no risk indicators triggered', C.MUTE)
         )
         .setStartIcon(mi('check_circle'))
     );
@@ -391,7 +535,7 @@ function buildResultCard(result) {
       var t = topContrib[i];
       if (i > 0) threatSec.addWidget(CardService.newDivider());
       var w = CardService.newDecoratedText()
-        .setTopLabel(t.name + '  \u00B7  ' + bc('+' + t.points, sevColor(t.severity)))
+        .setTopLabel(t.name + '  ·  ' + bc('+' + t.points, sevColor(t.severity)))
         .setText(sevTag(t.severity) + '<br>' + t.description.substring(0, 140))
         .setWrapText(true)
         .setStartIcon(mi(sevMi(t.severity)));
@@ -410,7 +554,27 @@ function buildResultCard(result) {
       .setStartIcon(mi('auto_awesome'))
   );
 
-  // \u2500\u2500 \u00A73: Signal Grid (collapsible) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // Block Sender button (for MALICIOUS or SUSPICIOUS verdicts)
+  if (sender && (verdict === 'MALICIOUS' || verdict === 'SUSPICIOUS')) {
+    threatSec.addWidget(CardService.newDivider());
+    threatSec.addWidget(
+      CardService.newDecoratedText()
+        .setText(fc('Flag all future emails from this sender as hostile', C.MUTE))
+        .setStartIcon(mi('block'))
+        .setButton(
+          CardService.newTextButton()
+            .setText('BLOCK SENDER')
+            .setOnClickAction(
+              CardService.newAction()
+                .setFunctionName('blockSender')
+                .setParameters({ 'sender': sender.substring(0, 200) })
+            )
+            .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        )
+    );
+  }
+
+  // ── §3: Signal Grid (collapsible) ─────────────────────
   var catPts = breakdown.category_points || {};
 
   var gridSec = CardService.newCardSection()
@@ -424,7 +588,7 @@ function buildResultCard(result) {
       .setTopLabel('SCORING')
       .setText(
         fc('Raw ', C.MUTE) + b('' + (breakdown.total_points || 0)) +
-        fc(' \u2192 Capped ', C.MUTE) + b('' + (breakdown.capped_points || 0)) +
+        fc(' → Capped ', C.MUTE) + b('' + (breakdown.capped_points || 0)) +
         fc(' / ' + (breakdown.max_points || 0), C.MUTE)
       )
       .setWrapText(true)
@@ -447,7 +611,7 @@ function buildResultCard(result) {
     );
   }
 
-  // \u2500\u2500 \u00A74: Evidence Chain (collapsible) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // ── §4: Evidence Chain (collapsible) ──────────────────
   var evSec = CardService.newCardSection()
     .setHeader('EVIDENCE CHAIN (' + evidence.length + ')')
     .setCollapsible(true)
@@ -466,7 +630,7 @@ function buildResultCard(result) {
       var idx = k < 9 ? '0' + (k + 1) : '' + (k + 1);
       evSec.addWidget(
         CardService.newDecoratedText()
-          .setTopLabel('[' + idx + '] ' + ev.signal + '  \u00B7  +' + ev.points)
+          .setTopLabel('[' + idx + '] ' + ev.signal + '  ·  +' + ev.points)
           .setText(ev.raw_value.substring(0, 140))
           .setBottomLabel(ev.source)
           .setWrapText(true)
@@ -475,12 +639,12 @@ function buildResultCard(result) {
     if (evidence.length > 15) {
       evSec.addWidget(
         CardService.newTextParagraph()
-          .setText(fc('\u2026 and ' + (evidence.length - 15) + ' more entries', C.MUTE))
+          .setText(fc('… and ' + (evidence.length - 15) + ' more entries', C.MUTE))
       );
     }
   }
 
-  // \u2500\u2500 \u00A75: All Signals (collapsible) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // ── §5: All Signals (collapsible) ─────────────────────
   var sigSec = CardService.newCardSection()
     .setHeader('ALL SIGNALS (' + allSignals.length + ')')
     .setCollapsible(true)
@@ -498,12 +662,12 @@ function buildResultCard(result) {
       sigSec.addWidget(
         CardService.newDecoratedText()
           .setTopLabel(
-            s.category.toUpperCase() + '  \u00B7  ' +
+            s.category.toUpperCase() + '  ·  ' +
             bc('+' + s.points, sevColor(s.severity))
           )
           .setText(
             sevTag(s.severity) + '<br>' +
-            b(s.name) + ' \u2014 ' + s.description.substring(0, 120)
+            b(s.name) + ' — ' + s.description.substring(0, 120)
           )
           .setWrapText(true)
           .setStartIcon(mi(sevMi(s.severity)))
@@ -511,7 +675,55 @@ function buildResultCard(result) {
     }
   }
 
-  // \u2500\u2500 \u00A76: Forensics (collapsible) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // ── §6: Confidence Detail (collapsible) ───────────────
+  var confSec = CardService.newCardSection()
+    .setHeader('CONFIDENCE DETAIL')
+    .setCollapsible(true)
+    .setNumUncollapsibleWidgets(0);
+
+  confSec.addWidget(
+    CardService.newDecoratedText()
+      .setTopLabel('CONFIDENCE RATING')
+      .setText(bc(confidence + '%', C.BLUE) + '  ' + fc(confLabel, C.MUTE))
+      .setStartIcon(mi('verified_user'))
+  );
+
+  var anyDown = false;
+  var sourceKeys = ['virustotal', 'safe_browsing', 'abuseipdb', 'whois'];
+  for (var si = 0; si < sourceKeys.length; si++) {
+    var sk = sourceKeys[si];
+    var cp = CONF_PENALTIES[sk];
+    if (srcAvail[sk] === false) {
+      anyDown = true;
+      confSec.addWidget(
+        CardService.newDecoratedText()
+          .setText(
+            fc('✗ ', C.WARN) + fc(cp.label + ' unavailable', C.MUTE) +
+            bc('  −' + cp.pts + ' pts', C.WARN)
+          )
+          .setStartIcon(mi('warning'))
+      );
+    } else {
+      confSec.addWidget(
+        CardService.newDecoratedText()
+          .setText(
+            fc('✓ ', C.SAFE) + fc(cp.label + ' active', C.MUTE)
+          )
+          .setStartIcon(mi('check_circle'))
+      );
+    }
+  }
+
+  if (!anyDown) {
+    confSec.addWidget(CardService.newDivider());
+    confSec.addWidget(
+      CardService.newTextParagraph().setText(
+        fc('All intelligence sources active — full confidence', C.SAFE)
+      )
+    );
+  }
+
+  // ── §7: Forensics (collapsible) ───────────────────────
   var metaSec = CardService.newCardSection()
     .setHeader('FORENSICS')
     .setCollapsible(true)
@@ -531,7 +743,7 @@ function buildResultCard(result) {
         .setStartIcon(mi('speed'))
     );
 
-  // \u2500\u2500 Assemble \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // ── Assemble ──────────────────────────────────────────
   return CardService.newCardBuilder()
     .setHeader(header)
     .addSection(scoreSec)
@@ -539,14 +751,58 @@ function buildResultCard(result) {
     .addSection(gridSec)
     .addSection(evSec)
     .addSection(sigSec)
+    .addSection(confSec)
     .addSection(metaSec)
     .build();
 }
 
 
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// ═══════════════════════════════════════════════════════════
+//  BLOCKED CONFIRMATION CARD
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Shown after the user blocks a sender domain.
+ *
+ * @param {string} domain - The domain that was blocked.
+ * @return {Card}
+ */
+function buildBlockedCard(domain) {
+  var header = CardService.newCardHeader()
+    .setTitle('SENDER BLOCKED')
+    .setSubtitle('Domain added to blacklist')
+    .setImageUrl(HDR.DANGER)
+    .setImageStyle(CardService.ImageStyle.CIRCLE);
+
+  var bodySec = CardService.newCardSection()
+    .addWidget(
+      CardService.newDecoratedText()
+        .setText(
+          bc(domain || 'unknown', C.DANGER) + '<br><br>' +
+          fc('All future emails from this domain will be flagged as ', C.MUTE) +
+          bc('MALICIOUS', C.DANGER) +
+          fc(' instantly — no API calls required.', C.MUTE)
+        )
+        .setWrapText(true)
+        .setStartIcon(mi('block'))
+    );
+
+  var hintSec = CardService.newCardSection()
+    .addWidget(CardService.newTextParagraph().setText(
+      fc('To unblock this domain, visit the add-on homepage and remove it from the BLOCKED DOMAINS list.', C.MUTE)
+    ));
+
+  return CardService.newCardBuilder()
+    .setHeader(header)
+    .addSection(bodySec)
+    .addSection(hintSec)
+    .build();
+}
+
+
+// ═══════════════════════════════════════════════════════════
 //  ERROR CARD
-// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// ═══════════════════════════════════════════════════════════
 
 /**
  * @param {string} message  - User-facing error message.

@@ -165,19 +165,84 @@ def _whois_lookup(domain: str) -> Optional[datetime]:
         return None
 
 
+def _check_auth_complete_failure(
+    domain: str,
+    authentication_results: Optional[str],
+) -> Optional[Signal]:
+    """
+    Fires a domain-category signal when the sender domain fails ALL three
+    authentication checks (SPF fail/softfail, DKIM fail/none, DMARC fail).
+
+    This is a deterministic, API-free signal distinct from the per-header
+    signals in the 'header' category: those measure individual protocol
+    failures; this measures that the domain as a whole has no valid
+    authentication posture — a strong indicator of a spoofed/malicious sender.
+
+    Returns a Signal (20 pts) or None.
+    """
+    if not authentication_results:
+        return None
+
+    import re as _re
+
+    def _result(protocol: str) -> Optional[str]:
+        m = _re.search(rf"\b{protocol}=(\S+)", authentication_results, _re.IGNORECASE)
+        if m:
+            return _re.sub(r"[;,)]$", "", m.group(1)).lower()
+        return None
+
+    spf   = _result("spf")
+    dkim  = _result("dkim")
+    dmarc = _result("dmarc")
+
+    spf_fail  = spf   in ("fail", "softfail")
+    dkim_fail = dkim  in ("fail", "none")
+    dmarc_fail = dmarc == "fail"
+
+    if spf_fail and dkim_fail and dmarc_fail:
+        logger.info(
+            "[domain-auth] Complete auth failure for domain=%s spf=%s dkim=%s dmarc=%s",
+            domain, spf, dkim, dmarc,
+        )
+        return Signal(
+            name="Domain: Complete Authentication Failure",
+            category="domain",
+            severity="critical",
+            description=(
+                f"The sender domain '{domain}' fails all three email authentication "
+                f"checks (SPF={spf}, DKIM={dkim}, DMARC={dmarc}). "
+                "A domain with no valid authentication posture is a strong indicator "
+                "of spoofing or deliberately malicious infrastructure."
+            ),
+            value=f"{domain}: spf={spf}, dkim={dkim}, dmarc={dmarc}",
+            points=20,
+        )
+
+    return None
+
+
 async def analyze_domain_age(
     sender: str,
     domain_cache: dict[str, Optional[datetime]],
     availability_flags: dict[str, bool],
+    authentication_results: Optional[str] = None,
 ) -> tuple[list[Signal], list[str]]:
     """
-    Checks the sender domain's registration age.
+    Checks the sender domain reputation and registration age.
+
+    Signals fired (additive up to category cap of 20 pts):
+      - VirusTotal domain reputation (20 pts malicious / 10 pts suspicious)
+      - Complete auth failure — SPF+DKIM+DMARC all fail (20 pts, deterministic)
+      - Very new domain < 7 days (20 pts)
+      - New domain < 30 days (12 pts)
 
     Args:
         sender: Raw From header value.
         domain_cache: Per-request dict mapping domain → creation_date (Decision D3).
             Pre-populated by caller; populated by this function if domain is new.
-        availability_flags: Mutable dict; sets 'whois' to False if lookup fails.
+        availability_flags: Mutable dict; sets 'whois' / 'virustotal' to False on failure.
+        authentication_results: Raw Authentication-Results header string (optional).
+            Used for the deterministic complete-auth-failure signal.
 
     Returns:
         (signals, parse_warnings)
@@ -196,6 +261,11 @@ async def analyze_domain_age(
     vt_signal = await _check_virustotal_domain(domain, availability_flags)
     if vt_signal:
         signals.append(vt_signal)
+
+    # ---- Deterministic: complete auth failure check ----
+    auth_signal = _check_auth_complete_failure(domain, authentication_results)
+    if auth_signal:
+        signals.append(auth_signal)
 
     # ---- Cache lookup (Decision D3) ----
     if domain in domain_cache:

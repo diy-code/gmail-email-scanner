@@ -13,12 +13,14 @@
  *   badge_safe.png, badge_suspicious.png, badge_malicious.png
  */
 
-var BADGE_BASE_URL = 'https://raw.githubusercontent.com/diy-code/gmail-email-scanner/main/assets/';
+var BADGE_BASE_URL = 'https://www.gstatic.com/images/icons/material/system/2x/';
+var SHIELD_ICON = 'https://www.gstatic.com/images/icons/material/system/2x/security_black_24dp.png';
 
+// Using Google Material icons as fallback (repo assets not yet uploaded)
 var VERDICT_BADGE = {
-  'SAFE':       BADGE_BASE_URL + 'badge_safe.png',
-  'SUSPICIOUS': BADGE_BASE_URL + 'badge_suspicious.png',
-  'MALICIOUS':  BADGE_BASE_URL + 'badge_malicious.png'
+  'SAFE':       'https://www.gstatic.com/images/icons/material/system/2x/check_circle_black_24dp.png',
+  'SUSPICIOUS': 'https://www.gstatic.com/images/icons/material/system/2x/warning_black_24dp.png',
+  'MALICIOUS':  'https://www.gstatic.com/images/icons/material/system/2x/dangerous_black_24dp.png'
 };
 
 // ---------------------------------------------------------------------------
@@ -29,7 +31,7 @@ function buildHomepageCard() {
   var header  = CardService.newCardHeader()
     .setTitle('Email Security Scanner')
     .setSubtitle('Open an email to analyze it')
-    .setImageUrl(BADGE_BASE_URL + 'shield_icon.png')
+    .setImageUrl(SHIELD_ICON)
     .setImageStyle(CardService.ImageStyle.CIRCLE);
 
   var section = CardService.newCardSection()
@@ -59,7 +61,7 @@ function buildInitialCard(subject, sender, messageId) {
   var header = CardService.newCardHeader()
     .setTitle('Email Security Scanner')
     .setSubtitle('Analyze this email for threats')
-    .setImageUrl(BADGE_BASE_URL + 'shield_icon.png')
+    .setImageUrl(SHIELD_ICON)
     .setImageStyle(CardService.ImageStyle.CIRCLE);
 
   var infoSection = CardService.newCardSection()
@@ -118,14 +120,14 @@ function buildResultCard(result) {
   var header = CardService.newCardHeader()
     .setTitle('Security Analysis')
     .setSubtitle(verdict + ' · ' + score + '/100')
-    .setImageUrl(VERDICT_BADGE[verdict] || BADGE_BASE_URL + 'shield_icon.png');
+    .setImageUrl(VERDICT_BADGE[verdict] || SHIELD_ICON);
 
   // ---- Verdict section ----
   var verdictSection = CardService.newCardSection()
     .setHeader('Verdict')
     .addWidget(
       CardService.newImage()
-        .setImageUrl(VERDICT_BADGE[verdict] || BADGE_BASE_URL + 'badge_suspicious.png')
+        .setImageUrl(VERDICT_BADGE[verdict] || VERDICT_BADGE['SUSPICIOUS'])
         .setAltText(verdict)
     )
     .addWidget(
@@ -230,7 +232,7 @@ function buildErrorCard(message, detail) {
   var header = CardService.newCardHeader()
     .setTitle('Analysis Unavailable')
     .setSubtitle('Something went wrong')
-    .setImageUrl(BADGE_BASE_URL + 'shield_icon.png');
+    .setImageUrl(SHIELD_ICON);
 
   var section = CardService.newCardSection()
     .addWidget(CardService.newTextParagraph().setText(message));

@@ -8,238 +8,352 @@ export interface Preset {
   data: AnalyzeRequest
 }
 
+/*
+ * Scoring formula: score = min(100, round(capped_total / 150 * 100))
+ * Category caps: header=45, url=55, ip=20, domain=20, behavior=10 → max=150
+ *
+ * Deterministic signals used (no API dependency):
+ *   header:   SPF Fail(15), DKIM Fail(15), DMARC Fail(15),
+ *             Reply-To Mismatch(8), Display Name Spoofing(10)
+ *   url:      URL Shortener(5), Typosquat(10 each)
+ *   domain:   Complete Auth Failure(20) — fires when SPF+DKIM+DMARC all fail
+ *   behavior: Urgency/Threat Language(10)
+ *
+ * API-dependent signal (presets 9–10 only):
+ *   ip:       AbuseIPDB confidence>25%(12) + >75%(+8) = 20
+ *             Uses 194.165.16.11 (confirmed 100% abuse confidence)
+ *
+ * Presets 0–8 use private IPs (10.0.0.1) in Received headers to avoid
+ * AbuseIPDB calls and keep scores fully deterministic.
+ */
+
 export const PRESETS: Preset[] = [
-  // ─── 0/10 — Fully clean internal corporate email ──────────────────────────
+  // ─── Score 0 — Clean corporate email (capped=0) ───────────────────────────
+  // All auth pass, no bad URLs, clean body, private IP → zero signals
   {
-    id: 'clean_internal',
-    label: 'Clean Internal',
+    id: 'score_0_clean',
+    label: 'Clean (0)',
     icon: '✅',
     expectedScore: 0,
     data: {
-      subject: 'Q1 Engineering All-Hands — Agenda',
+      subject: 'Q1 Engineering All-Hands — Agenda & Calendar Invite',
       sender: 'Alice Johnson <alice.johnson@google.com>',
       reply_to: 'alice.johnson@google.com',
       authentication_results:
-        'spf=pass (google.com: domain of alice.johnson@google.com designates 74.125.0.1 as permitted sender) smtp.mailfrom=google.com; dkim=pass header.i=@google.com header.s=20230601; dmarc=pass (p=REJECT) header.from=google.com',
+        'spf=pass (google.com: domain of alice.johnson@google.com designates 209.85.208.182 as permitted sender) smtp.mailfrom=google.com; dkim=pass header.d=google.com; dmarc=pass (p=REJECT) header.from=google.com',
       received_headers: [
-        'Received: from mail-lj1-f182.google.com (mail-lj1-f182.google.com [209.85.208.182]) by mx.google.com with ESMTPS id abc123 for <user@gmail.com>; Mon, 22 Feb 2026 09:00:00 +0000',
+        'Received: from mail-lj1-f182.google.com (mail-lj1-f182.google.com [10.0.0.1]) by mx.google.com with ESMTPS id abc123; Mon, 22 Feb 2026 09:00:00 +0000',
       ],
       body_plain:
-        'Hi everyone,\n\nJust a reminder that our Q1 All-Hands is this Thursday at 2pm PST in Maple conference room.\n\nAgenda:\n1. Q4 2025 recap\n2. 2026 roadmap preview\n3. Open Q&A\n\nCalendar invite already sent. No action needed.\n\nSee you there,\nAlice',
+        'Hi everyone,\n\nJust a reminder that our Q1 All-Hands is this Thursday at 2 pm PST in the Maple conference room.\n\nAgenda:\n1. Q4 2025 recap\n2. 2026 roadmap preview\n3. Open Q&A\n\nCalendar invite already sent. No action needed.\n\nSee you there,\nAlice',
       body_html: '',
       urls: ['https://calendar.google.com/event?eid=abc123'],
       message_date: 'Mon, 22 Feb 2026 09:00:00 +0000',
     },
   },
 
-  // ─── 1/10 — Legit marketing newsletter ────────────────────────────────────
+  // ─── Score 10 — SPF fail only (capped=15) ─────────────────────────────────
+  // header: SPF Fail(15) = 15.  round(15/150*100) = 10
   {
-    id: 'newsletter',
-    label: 'Newsletter',
-    icon: '📧',
-    expectedScore: 8,
+    id: 'score_10_spf',
+    label: 'SPF Fail (10)',
+    icon: '📋',
+    expectedScore: 10,
     data: {
-      subject: 'Your GitHub Digest — Feb 2026',
-      sender: 'GitHub <noreply@github.com>',
-      reply_to: null,
+      subject: 'Team standup notes — Feb 22',
+      sender: 'bob.wilson@startup-corp.io',
+      reply_to: 'bob.wilson@startup-corp.io',
       authentication_results:
-        'spf=pass smtp.mailfrom=github.com; dkim=pass header.d=github.com; dmarc=pass',
+        'spf=fail (startup-corp.io does not designate 198.51.100.5 as permitted sender) smtp.mailfrom=startup-corp.io; dkim=pass header.d=startup-corp.io; dmarc=pass',
       received_headers: [
-        'Received: from smtp.github.com (smtp.github.com [192.30.252.1]) by mx.google.com with ESMTPS for <user@gmail.com>; Mon, 22 Feb 2026 08:00:00 +0000',
+        'Received: from mail.startup-corp.io (mail.startup-corp.io [10.0.0.1]) by mx.google.com with ESMTP id def456; Mon, 22 Feb 2026 10:00:00 +0000',
       ],
       body_plain:
-        'Hi there,\n\nHere is your weekly GitHub digest.\n\nTrending repositories this week:\n- microsoft/vscode — 142k stars\n- openai/openai-python — 98k stars\n\nView full digest: https://github.com/explore\n\nYou are receiving this because you signed up for GitHub Explore.\nUnsubscribe: https://github.com/settings/notifications',
+        'Hi team,\n\nHere are the standup notes from today:\n\n- Backend: API refactor on track for Friday\n- Frontend: New dashboard deployed to staging\n- DevOps: CI pipeline green after config update\n\nNext standup: Wednesday 9 am.\n\nBob',
       body_html: '',
-      urls: [
-        'https://github.com/explore',
-        'https://github.com/settings/notifications',
-      ],
-      message_date: 'Mon, 22 Feb 2026 08:00:00 +0000',
-    },
-  },
-
-  // ─── 2/10 — Legit but new sender domain (SPF softfail) ────────────────────
-  {
-    id: 'new_vendor',
-    label: 'New Vendor',
-    icon: '🏢',
-    expectedScore: 18,
-    data: {
-      subject: 'Invoice #INV-2026-0042 from Acme Consulting LLC',
-      sender: 'billing@acme-consulting-llc.com',
-      reply_to: 'billing@acme-consulting-llc.com',
-      authentication_results:
-        'spf=softfail (domain of billing@acme-consulting-llc.com does not designate 198.51.100.0 as permitted sender) smtp.mailfrom=acme-consulting-llc.com; dkim=pass header.d=acme-consulting-llc.com; dmarc=none',
-      received_headers: [
-        'Received: from mail.acme-consulting-llc.com (mail.acme-consulting-llc.com [198.51.100.0]) by mx.google.com with ESMTP for <user@company.com>; Mon, 22 Feb 2026 10:00:00 +0000',
-      ],
-      body_plain:
-        'Dear Finance Team,\n\nPlease find attached invoice INV-2026-0042 for consulting services rendered in January 2026.\n\nAmount Due: $4,250.00\nDue Date: March 15, 2026\nPayment Method: Bank transfer or check\n\nDownload invoice: https://acme-consulting-llc.com/invoices/INV-2026-0042.pdf\n\nThank you for your business.\n\nBest regards,\nBilling Department\nAcme Consulting LLC',
-      body_html: '',
-      urls: ['https://acme-consulting-llc.com/invoices/INV-2026-0042.pdf'],
+      urls: ['https://startup-corp.io/wiki/standup-notes'],
       message_date: 'Mon, 22 Feb 2026 10:00:00 +0000',
     },
   },
 
-  // ─── 3/10 — Suspicious reply-to mismatch + shortened link ─────────────────
+  // ─── Score 20 — SPF + DKIM fail (capped=30) ───────────────────────────────
+  // header: SPF(15) + DKIM(15) = 30.  DMARC=pass → no domain signal.
+  // round(30/150*100) = 20
   {
-    id: 'reply_mismatch',
-    label: 'Reply Mismatch',
-    icon: '🔀',
-    expectedScore: 30,
+    id: 'score_20_auth',
+    label: 'Auth Weak (20)',
+    icon: '📧',
+    expectedScore: 20,
     data: {
-      subject: 'Your package is ready for pickup',
-      sender: 'FedEx Notifications <notifications@fedex.com>',
-      reply_to: 'support@fedex-tracking-info.net',
+      subject: 'Invoice #INV-2026-0042 from Acme Consulting',
+      sender: 'billing@acme-consulting.biz',
+      reply_to: 'billing@acme-consulting.biz',
       authentication_results:
-        'spf=pass smtp.mailfrom=fedex.com; dkim=fail (signature did not verify); dmarc=none',
+        'spf=fail smtp.mailfrom=acme-consulting.biz; dkim=none; dmarc=pass',
       received_headers: [
-        'Received: from outbound.fedex.com (outbound.fedex.com [158.48.0.1]) by mx.google.com with ESMTP for <user@gmail.com>; Mon, 22 Feb 2026 11:00:00 +0000',
+        'Received: from mail.acme-consulting.biz (mail.acme-consulting.biz [10.0.0.1]) by mx.google.com with ESMTP id ghi789; Mon, 22 Feb 2026 11:00:00 +0000',
       ],
       body_plain:
-        'Your package #773901240140 is available for pickup at your local FedEx location.\n\nTrack your shipment: https://bit.ly/fedex-track-7739\n\nPickup by Feb 25 or the package will be returned.\n\nFedEx Customer Service',
+        'Dear Finance Team,\n\nPlease find attached invoice INV-2026-0042 for consulting services rendered in January 2026.\n\nAmount Due: $4,250.00\nDue Date: March 15, 2026\nPayment Method: Bank transfer or check\n\nDownload invoice: https://acme-consulting.biz/invoices/INV-2026-0042.pdf\n\nThank you for your business.\n\nBilling Department\nAcme Consulting',
       body_html: '',
-      urls: ['https://bit.ly/fedex-track-7739'],
+      urls: ['https://acme-consulting.biz/invoices/INV-2026-0042.pdf'],
       message_date: 'Mon, 22 Feb 2026 11:00:00 +0000',
     },
   },
 
-  // ─── 4/10 — SPF fail, new typosquatted-looking domain ─────────────────────
+  // ─── Score 30 — Auth fail + shortener + typosquat (capped=45) ──────────────
+  // header: SPF(15) + DKIM(15) = 30.  url: shortener(5) + typosquat(10) = 15.
+  // round(45/150*100) = 30
   {
-    id: 'typosquat_mild',
-    label: 'Typosquat Domain',
-    icon: '🔤',
-    expectedScore: 42,
+    id: 'score_30_urls',
+    label: 'Bad URLs (30)',
+    icon: '🔗',
+    expectedScore: 30,
     data: {
-      subject: 'Action required: Verify your Microsoft account',
-      sender: 'Microsoft Security <security@micros0ft-account.com>',
-      reply_to: 'no-reply@micros0ft-account.com',
+      subject: 'Your recent order has shipped',
+      sender: 'shipping@parcel-notifications.com',
+      reply_to: 'shipping@parcel-notifications.com',
       authentication_results:
-        'spf=fail smtp.mailfrom=micros0ft-account.com; dkim=fail; dmarc=fail',
+        'spf=fail smtp.mailfrom=parcel-notifications.com; dkim=fail; dmarc=pass',
       received_headers: [
-        'Received: from mail.micros0ft-account.com (mail.micros0ft-account.com [91.108.4.1]) by mx.google.com with ESMTP for <user@gmail.com>; Mon, 22 Feb 2026 03:00:00 +0000',
+        'Received: from mail.parcel-notifications.com (mail.parcel-notifications.com [10.0.0.1]) by mx.google.com with ESMTP id jkl012; Mon, 22 Feb 2026 12:00:00 +0000',
       ],
       body_plain:
-        'Dear Microsoft Account User,\n\nWe detected unusual sign-in activity on your account. Please verify your identity within 48 hours.\n\nVerify now: https://micros0ft-account.com/verify\n\nMicrosoft Support',
+        'Your package has shipped!\n\nTracking number: 7739-0124-0140\n\nTrack your shipment here:\nhttps://bit.ly/track-pkg-7739\n\nOr check delivery status at:\nhttps://amaz0n.com/track?id=7739\n\nExpected delivery: Feb 25, 2026.\n\nShipping Department',
       body_html: '',
-      urls: ['https://micros0ft-account.com/verify'],
-      message_date: 'Mon, 22 Feb 2026 03:00:00 +0000',
+      urls: [
+        'https://bit.ly/track-pkg-7739',
+        'https://amaz0n.com/track?id=7739',
+      ],
+      message_date: 'Mon, 22 Feb 2026 12:00:00 +0000',
     },
   },
 
-  // ─── 5/10 — Mixed signals: credential language + URL shortener ────────────
+  // ─── Score 40 — Header capped + URL signals (capped=60) ───────────────────
+  // header: SPF(15)+DKIM(15)+Reply-To(8)+DisplayName(10) = 48 → cap 45.
+  // DMARC=pass → no domain signal.
+  // url: shortener(5) + typosquat(10) = 15.
+  // round(60/150*100) = 40
   {
-    id: 'mixed_signals',
-    label: 'Mixed Signals',
+    id: 'score_40_spoof',
+    label: 'Spoofed (40)',
+    icon: '🎭',
+    expectedScore: 40,
+    data: {
+      subject: 'Update your billing information',
+      sender: 'PayPal <billing@paypal-billing-update.com>',
+      reply_to: 'support@paypal-help-center.net',
+      authentication_results:
+        'spf=fail smtp.mailfrom=paypal-billing-update.com; dkim=fail; dmarc=pass',
+      received_headers: [
+        'Received: from mail.paypal-billing-update.com (mail.paypal-billing-update.com [10.0.0.1]) by mx.google.com with ESMTP id mno345; Mon, 22 Feb 2026 13:00:00 +0000',
+      ],
+      body_plain:
+        'Hello,\n\nWe noticed your billing information may be out of date. Please review and update your payment method at your convenience.\n\nUpdate here:\nhttps://bit.ly/pp-billing-update\n\nOr visit:\nhttps://paypa1.com/billing\n\nThank you,\nPayPal Support',
+      body_html: '',
+      urls: [
+        'https://bit.ly/pp-billing-update',
+        'https://paypa1.com/billing',
+      ],
+      message_date: 'Mon, 22 Feb 2026 13:00:00 +0000',
+    },
+  },
+
+  // ─── Score 50 — Header capped + 2 typosquats + behavior (capped=75) ───────
+  // header: SPF(15)+DKIM(15)+Reply-To(8)+DisplayName(10) = 48 → cap 45.
+  // DMARC=pass → no domain signal.
+  // url: 2 typosquats(10+10) = 20.
+  // behavior: urgency(10).
+  // round(75/150*100) = 50
+  {
+    id: 'score_50_phish',
+    label: 'Phishing (50)',
     icon: '⚠️',
-    expectedScore: 52,
+    expectedScore: 50,
     data: {
-      subject: 'Your Apple ID has been locked — Verify immediately',
-      sender: 'Apple Support <appleid@apple-id-support.org>',
-      reply_to: 'noreply@apple-id-support.org',
+      subject: 'Action required: Verify your Netflix account',
+      sender: 'Netflix <account@netflix-verify-center.com>',
+      reply_to: 'help@netflix-billing-alert.net',
       authentication_results:
-        'spf=fail smtp.mailfrom=apple-id-support.org; dkim=fail; dmarc=fail',
+        'spf=fail smtp.mailfrom=netflix-verify-center.com; dkim=none; dmarc=pass',
       received_headers: [
-        'Received: from smtp.apple-id-support.org (smtp.apple-id-support.org [45.142.212.100]) by mx.google.com with ESMTP for <user@gmail.com>; Mon, 22 Feb 2026 04:00:00 +0000',
+        'Received: from mail.netflix-verify-center.com (mail.netflix-verify-center.com [10.0.0.1]) by mx.google.com with ESMTP id pqr678; Mon, 22 Feb 2026 14:00:00 +0000',
       ],
       body_plain:
-        'Your Apple ID has been locked due to too many failed sign-in attempts.\n\nTo unlock your account and prevent permanent suspension, click below:\nhttps://apple-id-support.org/unlock?token=a9f3c2\n\nIf you do not verify within 24 hours, your account will be permanently disabled.\n\nApple Support Team',
+        'Dear Netflix Member,\n\nYour account will be suspended due to a billing issue. Please verify your identity within 24 hours to avoid service interruption.\n\nVerify now:\nhttps://netf1ix.com/verify-account\n\nAlternate verification link:\nhttps://paypa1.com/netflix-billing\n\nNetflix Support',
       body_html: '',
-      urls: ['https://apple-id-support.org/unlock?token=a9f3c2'],
-      message_date: 'Mon, 22 Feb 2026 04:00:00 +0000',
+      urls: [
+        'https://netf1ix.com/verify-account',
+        'https://paypa1.com/netflix-billing',
+      ],
+      message_date: 'Mon, 22 Feb 2026 14:00:00 +0000',
     },
   },
 
-  // ─── 6/10 — Bank impersonation + credential harvesting ────────────────────
+  // ─── Score 60 — All auth fail → domain signal + URL + behavior (capped=90) ─
+  // header: SPF(15)+DKIM(15)+DMARC(15) = 45.
+  // domain: Complete Auth Failure(20).
+  // url: shortener(5) + typosquat(10) = 15.
+  // behavior: urgency(10).
+  // round(90/150*100) = 60
   {
-    id: 'bank_impersonation',
-    label: 'Bank Impersonation',
-    icon: '🏦',
-    expectedScore: 63,
+    id: 'score_60_domain',
+    label: 'Domain Fail (60)',
+    icon: '🔓',
+    expectedScore: 60,
     data: {
-      subject: 'ALERT: Suspicious transaction detected on your account',
-      sender: 'Bank of America <alert@bankofamerica-secure.net>',
-      reply_to: 'support@securebank-verify.com',
+      subject: 'Apple ID: Unusual sign-in from new device',
+      sender: 'Apple Support <support@apple-id-verify.net>',
+      reply_to: 'support@apple-id-verify.net',
       authentication_results:
-        'spf=fail smtp.mailfrom=bankofamerica-secure.net; dkim=fail; dmarc=fail',
+        'spf=fail smtp.mailfrom=apple-id-verify.net; dkim=none; dmarc=fail',
       received_headers: [
-        'Received: from mail.bankofamerica-secure.net (mail.bankofamerica-secure.net [185.220.101.45]) by mx.google.com with ESMTP for <user@gmail.com>; Mon, 22 Feb 2026 02:00:00 +0000',
+        'Received: from mail.apple-id-verify.net (mail.apple-id-verify.net [10.0.0.1]) by mx.google.com with ESMTP id stu901; Mon, 22 Feb 2026 15:00:00 +0000',
       ],
       body_plain:
-        'IMPORTANT SECURITY ALERT\n\nWe have detected a suspicious transaction of $3,499.00 on your Bank of America checking account ending in 4821.\n\nIf you did not authorize this transaction, you must verify your account credentials IMMEDIATELY to freeze the transaction.\n\nVerify your account: https://bankofamerica-secure.net/verify-account\n\nYou must act within 2 hours or the transaction will be processed.\n\nBank of America Security Team',
+        'Your Apple ID was used to sign in on a new device. If this was not you, your account will be locked.\n\nVerify your identity within 24 hours:\nhttps://bit.ly/apple-id-verify\n\nOr visit:\nhttps://app1e.com/id-verify\n\nApple Support',
       body_html: '',
-      urls: ['https://bankofamerica-secure.net/verify-account'],
-      message_date: 'Mon, 22 Feb 2026 02:00:00 +0000',
+      urls: [
+        'https://bit.ly/apple-id-verify',
+        'https://app1e.com/id-verify',
+      ],
+      message_date: 'Mon, 22 Feb 2026 15:00:00 +0000',
     },
   },
 
-  // ─── 7/10 — IRS/Gov impersonation + urgency ───────────────────────────────
+  // ─── Score 70 — Auth fail + domain + 3 typosquats + behavior (capped=105) ──
+  // header: SPF(15)+DKIM(15)+DMARC(15) = 45.
+  // domain: Complete Auth Failure(20).
+  // url: 3 typosquats(10×3) = 30.
+  // behavior: urgency(10).
+  // round(105/150*100) = 70
   {
-    id: 'irs_scam',
-    label: 'IRS Scam',
-    icon: '🏛️',
-    expectedScore: 74,
+    id: 'score_70_multi',
+    label: 'Multi-Threat (70)',
+    icon: '🔶',
+    expectedScore: 70,
     data: {
-      subject: 'Final Notice: Unpaid tax balance — Legal action pending',
-      sender: 'IRS Tax Division <irs-taxnotice@irs-gov-refunds.com>',
-      reply_to: 'collections@irs-gov-refunds.com',
+      subject: 'URGENT: Multiple accounts compromised — Verify now',
+      sender: 'Security Alert <alerts@account-security-center.com>',
+      reply_to: 'alerts@account-security-center.com',
       authentication_results:
-        'spf=fail smtp.mailfrom=irs-gov-refunds.com; dkim=fail; dmarc=fail',
+        'spf=fail smtp.mailfrom=account-security-center.com; dkim=none; dmarc=fail',
       received_headers: [
-        'Received: from smtp.irs-gov-refunds.com (smtp.irs-gov-refunds.com [92.63.194.51]) by mx.google.com with ESMTP for <user@gmail.com>; Sun, 21 Feb 2026 23:00:00 +0000',
+        'Received: from mail.account-security-center.com (mail.account-security-center.com [10.0.0.1]) by mx.google.com with ESMTP id vwx234; Mon, 22 Feb 2026 16:00:00 +0000',
       ],
       body_plain:
-        'FINAL NOTICE — IMMEDIATE ACTION REQUIRED\n\nThis is your final notice regarding an unpaid federal tax balance of $4,812.37.\n\nFailure to pay within 48 HOURS will result in:\n- Wage garnishment\n- Bank account seizure\n- Criminal prosecution\n\nTo avoid legal action, pay immediately: https://irs-gov-refunds.com/pay-now\n\nProvide your SSN and banking details to process payment.\n\nInternal Revenue Service\nCompliance Division',
+        'SECURITY NOTICE\n\nWe detected suspicious activity across your linked accounts. Your account will be suspended unless you re-verify each service.\n\nVerify PayPal: https://paypa1.com/verify\nVerify Amazon: https://amaz0n.com/verify\nVerify Apple: https://app1e.com/verify\n\nAction required within 24 hours.\n\nSecurity Operations Center',
       body_html: '',
-      urls: ['https://irs-gov-refunds.com/pay-now'],
-      message_date: 'Sun, 21 Feb 2026 23:00:00 +0000',
+      urls: [
+        'https://paypa1.com/verify',
+        'https://amaz0n.com/verify',
+        'https://app1e.com/verify',
+      ],
+      message_date: 'Mon, 22 Feb 2026 16:00:00 +0000',
     },
   },
 
-  // ─── 8/10 — PayPal phishing with real shortened URL pattern ───────────────
+  // ─── Score 80 — Auth fail + domain + shortener + 4 typosquats + behavior (capped=120)
+  // header: SPF(15)+DKIM(15)+DMARC(15) = 45.
+  // domain: Complete Auth Failure(20).
+  // url: shortener(5) + 4 typosquats(10×4) = 45.
+  // behavior: urgency(10).
+  // round(120/150*100) = 80
   {
-    id: 'paypal_phish',
-    label: 'PayPal Phishing',
-    icon: '🎣',
-    expectedScore: 85,
+    id: 'score_80_heavy',
+    label: 'Heavy Phish (80)',
+    icon: '🔴',
+    expectedScore: 80,
     data: {
-      subject: '⚠️ URGENT: Your PayPal account has been permanently limited!',
-      sender: 'PayPal Security <security@paypa1-secure.net>',
-      reply_to: 'recovery@paypa1-updates.ru',
+      subject: 'Final warning: Account termination in 24 hours',
+      sender: 'Account Security <alerts@secure-account-alerts.com>',
+      reply_to: 'alerts@secure-account-alerts.com',
       authentication_results:
-        'spf=fail smtp.mailfrom=paypa1-secure.net; dkim=fail; dmarc=fail',
+        'spf=fail smtp.mailfrom=secure-account-alerts.com; dkim=none; dmarc=fail',
       received_headers: [
-        'Received: from mail.paypa1-secure.net (mail.paypa1-secure.net [5.188.206.14]) by mx.google.com with ESMTP for <user@gmail.com>; Mon, 22 Feb 2026 01:00:00 +0000',
+        'Received: from smtp.secure-account-alerts.com (smtp.secure-account-alerts.com [10.0.0.1]) by mx.google.com with ESMTP id yza567; Mon, 22 Feb 2026 17:00:00 +0000',
       ],
       body_plain:
-        'Dear PayPal Customer,\n\nYour account has been PERMANENTLY LIMITED due to suspicious activity.\n\nYou must verify your identity within 24 HOURS or your account will be closed and funds held for 180 days.\n\nRestore your account now: http://bit.ly/paypal-restore-account9\n\nYou will need to provide:\n- Full name\n- Date of birth\n- Social Security Number\n- Bank account and routing number\n- Credit card details\n\nPayPal Account Services',
-      body_html:
-        '<html><body style="font-family:Arial"><img src="https://paypa1-secure.net/logo.png" width="120"/><p><b style="color:red">URGENT: Your account is limited!</b></p><p>Click to restore: <a href="http://bit.ly/paypal-restore-account9">Restore Account</a></p><p>Provide your <b>banking details, SSN and credit card</b> to verify.</p></body></html>',
-      urls: ['http://bit.ly/paypal-restore-account9'],
-      message_date: 'Mon, 22 Feb 2026 01:00:00 +0000',
+        'FINAL WARNING\n\nYour linked accounts have been flagged for termination. Your account will be closed permanently unless you verify within 24 hours.\n\nVerify each account:\nhttps://bit.ly/secure-reauth-now\nhttps://paypa1.com/verify-account\nhttps://amaz0n.com/secure-login\nhttps://app1e.com/id-restore\nhttps://netf1ix.com/reactivate\n\nFailure to act will result in permanent data loss.\n\nSecurity Operations Center',
+      body_html: '',
+      urls: [
+        'https://bit.ly/secure-reauth-now',
+        'https://paypa1.com/verify-account',
+        'https://amaz0n.com/secure-login',
+        'https://app1e.com/id-restore',
+        'https://netf1ix.com/reactivate',
+      ],
+      message_date: 'Mon, 22 Feb 2026 17:00:00 +0000',
     },
   },
 
-  // ─── 9/10 — Full malware dropper / CEO fraud ──────────────────────────────
+  // ─── Score 90 — All categories + IP reputation (capped=135) ────────────────
+  // header: SPF(15)+DKIM(15)+DMARC(15) = 45.
+  // domain: Complete Auth Failure(20).
+  // url: 4 typosquats(10×4) = 40.
+  // behavior: urgency(10).
+  // ip: AbuseIPDB 194.165.16.11 confidence=100% → 12+8 = 20.
+  // round(135/150*100) = 90
   {
-    id: 'ceo_fraud',
-    label: 'CEO Fraud',
+    id: 'score_90_ip',
+    label: 'IP + Phish (90)',
     icon: '🚨',
-    expectedScore: 96,
+    expectedScore: 90,
     data: {
-      subject: 'Confidential — Wire Transfer Required TODAY',
-      sender: 'CEO John Smith <ceo@yourcompany-finance.com>',
-      reply_to: 'j.smith.cfo@gmail.com',
+      subject: 'CRITICAL: Immediate action required — Account breach detected',
+      sender: 'Incident Response <security@breach-alert-center.com>',
+      reply_to: 'security@breach-alert-center.com',
       authentication_results:
-        'spf=fail smtp.mailfrom=yourcompany-finance.com; dkim=fail; dmarc=fail',
+        'spf=fail smtp.mailfrom=breach-alert-center.com; dkim=none; dmarc=fail',
       received_headers: [
-        'Received: from vps.yourcompany-finance.com (vps.yourcompany-finance.com [194.165.16.142]) by mx.google.com with ESMTP for <finance@yourcompany.com>; Mon, 22 Feb 2026 00:30:00 +0000',
+        'Received: from smtp.breach-alert-center.com (smtp.breach-alert-center.com [194.165.16.11]) by mx.google.com with ESMTP id bcd890; Mon, 22 Feb 2026 18:00:00 +0000',
       ],
       body_plain:
-        'This is strictly confidential. Do not discuss with anyone.\n\nI am in a board meeting and need you to process an urgent wire transfer of $87,500 to close a confidential acquisition deal TODAY before 5pm.\n\nDo NOT follow normal approval procedures — this is time-sensitive and legally sensitive.\n\nWire to:\nBank: HSBC Hong Kong\nAccount Name: Apex Holdings Ltd\nAccount #: 012-345678-001\nRouting: 021000089\n\nOnce complete, confirm by downloading and running the secure transfer receipt tool from: https://secure-wiretransfer-confirm.xyz/tool.exe\n\nDo not email me — I am unavailable. Reply only to this email.\n\nJohn Smith\nCEO',
+        'CRITICAL SECURITY ALERT\n\nA data breach has been detected on your linked accounts. Your account will be terminated unless you re-verify immediately.\n\nSecure your accounts now:\nhttps://paypa1.com/breach-verify\nhttps://amaz0n.com/incident-response\nhttps://app1e.com/security-check\nhttps://netf1ix.com/breach-alert\n\nYou have 24 hours to respond.\n\nIncident Response Team',
       body_html: '',
-      urls: ['https://secure-wiretransfer-confirm.xyz/tool.exe'],
-      message_date: 'Mon, 22 Feb 2026 00:30:00 +0000',
+      urls: [
+        'https://paypa1.com/breach-verify',
+        'https://amaz0n.com/incident-response',
+        'https://app1e.com/security-check',
+        'https://netf1ix.com/breach-alert',
+      ],
+      message_date: 'Mon, 22 Feb 2026 18:00:00 +0000',
+    },
+  },
+
+  // ─── Score 100 — All categories maxed (capped=150) ─────────────────────────
+  // header: SPF(15)+DKIM(15)+DMARC(15)+Reply-To(8)+DisplayName(10) = 63 → cap 45.
+  // domain: Complete Auth Failure(20).
+  // url: shortener(5) + 5 typosquats(10×5) = 55.
+  // behavior: urgency(10).
+  // ip: AbuseIPDB 194.165.16.11 → 12+8 = 20.
+  // round(150/150*100) = 100
+  {
+    id: 'score_100_max',
+    label: 'Maximum (100)',
+    icon: '💀',
+    expectedScore: 100,
+    data: {
+      subject: '⚠️ URGENT: Verify Your PayPal Account NOW or Lose Access',
+      sender: 'PayPal Security Team <service@malware.wicar.org>',
+      reply_to: 'noreply@phishing-redirects.ru',
+      authentication_results:
+        'spf=fail (domain of malware.wicar.org does not designate 194.165.16.11 as permitted sender) smtp.mailfrom=service@malware.wicar.org; dkim=none; dmarc=fail action=none header.from=malware.wicar.org',
+      received_headers: [
+        'Received: from mail.malware.wicar.org (mail.malware.wicar.org [194.165.16.11]) by mx.google.com with ESMTP id x7si2034820qkj; Mon, 22 Feb 2026 19:00:00 +0000',
+      ],
+      body_plain:
+        'URGENT: Your account will be suspended immediately.\n\nYou must verify your identity NOW or your account will be permanently deleted and funds frozen for 180 days.\n\nClick here:\nhttps://bit.ly/secure-pp-verify\nhttps://paypa1.com/verify\nhttps://amaz0n.com/secure\nhttps://app1e.com/verify\nhttps://netf1ix.com/account\nhttps://g00gle.com/verify\n\nAct within 24 hours or face permanent closure.',
+      body_html: '',
+      urls: [
+        'https://bit.ly/secure-pp-verify',
+        'https://paypa1.com/verify',
+        'https://amaz0n.com/secure',
+        'https://app1e.com/verify',
+        'https://netf1ix.com/account',
+        'https://g00gle.com/verify',
+      ],
+      message_date: 'Mon, 22 Feb 2026 19:00:00 +0000',
     },
   },
 ]

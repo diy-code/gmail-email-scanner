@@ -1,4 +1,16 @@
 {
-  "scriptId": "REPLACE_WITH_SCRIPT_ID_AFTER_CLASP_CREATE",
-  "rootDir": "."
+  "scriptId": "1nzC93ElbxcXP9RFkkhuczYeEvxRIpBsOkbCgLbogOGZJz4hlJGudb64H",
+  "rootDir": "",
+  "scriptExtensions": [
+    ".js",
+    ".gs"
+  ],
+  "htmlExtensions": [
+    ".html"
+  ],
+  "jsonExtensions": [
+    ".json"
+  ],
+  "filePushOrder": [],
+  "skipSubdirectories": false
 }

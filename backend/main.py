@@ -174,7 +174,7 @@ async def analyze(
             ),
             analyze_urls(body.urls, availability),
             analyze_ip_reputation(body.received_headers, availability),
-            analyze_domain_age(body.sender, domain_cache, availability),
+            analyze_domain_age(body.sender, domain_cache, availability, body.authentication_results),
         )
     except Exception as exc:
         logger.error("Signal engine failure request_id=%s: %s", request_id, exc, exc_info=True)

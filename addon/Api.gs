@@ -17,14 +17,8 @@
  */
 function callAnalyzeEndpoint(payload) {
   var props       = PropertiesService.getScriptProperties();
-  var apiKey      = props.getProperty('BACKEND_API_KEY');
-  var backendUrl  = props.getProperty('BACKEND_URL');
-
-  if (!backendUrl || !apiKey) {
-    return {
-      error: 'Backend not configured. Please run the setup() function in the Apps Script editor.'
-    };
-  }
+  var apiKey      = props.getProperty('BACKEND_API_KEY') || 'this_is_a_random_key';
+  var backendUrl  = props.getProperty('BACKEND_URL') || 'https://email-scanner-backend-249452416372.us-central1.run.app';
 
   var options = {
     method:          'post',
@@ -77,10 +71,8 @@ function callAnalyzeEndpoint(payload) {
  * @return {Object} Health response or error object.
  */
 function checkBackendHealth() {
-  var backendUrl = PropertiesService.getScriptProperties().getProperty('BACKEND_URL');
-  if (!backendUrl) {
-    return { error: 'BACKEND_URL not configured.' };
-  }
+  var backendUrl = PropertiesService.getScriptProperties().getProperty('BACKEND_URL')
+      || 'https://email-scanner-backend-249452416372.us-central1.run.app';
 
   try {
     var response = UrlFetchApp.fetch(backendUrl + '/health', { muteHttpExceptions: true });

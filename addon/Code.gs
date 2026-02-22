@@ -23,8 +23,8 @@
  */
 function setup() {
   PropertiesService.getScriptProperties().setProperties({
-    'BACKEND_URL': 'https://REPLACE_WITH_YOUR_CLOUD_RUN_URL',
-    'BACKEND_API_KEY': 'REPLACE_WITH_YOUR_API_KEY'
+    'BACKEND_URL': 'https://email-scanner-backend-249452416372.us-central1.run.app',
+    'BACKEND_API_KEY': 'this_is_a_random_key'
   });
   Logger.log('Setup complete. Backend URL and API key stored in Script Properties.');
 }
@@ -175,3 +175,5 @@ function extractEmailPayload(message) {
     message_date:           message.getDate() ? message.getDate().toISOString() : null
   };
 }
+
+

@@ -181,6 +181,6 @@ def _source_for_category(category: str) -> str:
         "header":   "Email Headers",
         "url":      "VirusTotal / Safe Browsing",
         "ip":       "AbuseIPDB",
-        "domain":   "WHOIS",
+        "domain":   "VirusTotal / WHOIS",
         "behavior": "Body Content Analysis",
     }.get(category, category)

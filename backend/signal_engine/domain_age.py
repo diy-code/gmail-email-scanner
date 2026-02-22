@@ -16,12 +16,106 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 import whois
 
 from config import settings
 from models import Signal
 
 logger = logging.getLogger(__name__)
+
+VIRUSTOTAL_DOMAIN_URL = "https://www.virustotal.com/api/v3/domains"
+
+
+async def _check_virustotal_domain(
+    domain: str,
+    availability_flags: dict[str, bool],
+) -> Optional[Signal]:
+    """
+    Queries VirusTotal GET /api/v3/domains/{domain} for reputation data.
+    Returns a Signal if the domain is flagged malicious or suspicious, None otherwise.
+    Sets availability_flags['virustotal'] = False on hard failures.
+    """
+    if not settings.virustotal_api_key:
+        logger.debug("VirusTotal API key not configured — domain reputation check skipped")
+        return None
+
+    headers = {"x-apikey": settings.virustotal_api_key}
+
+    logger.info("[VT-domain] Querying VirusTotal domain reputation for domain=%s", domain)
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{VIRUSTOTAL_DOMAIN_URL}/{domain}",
+                headers=headers,
+                timeout=settings.signal_timeout_seconds,
+            )
+    except httpx.TimeoutException:
+        logger.warning("[VT-domain] VirusTotal domain lookup timed out for domain=%s", domain)
+        availability_flags["virustotal"] = False
+        return None
+    except Exception as exc:
+        logger.warning("[VT-domain] VirusTotal domain lookup error for domain=%s: %s", domain, exc)
+        availability_flags["virustotal"] = False
+        return None
+
+    if resp.status_code == 429:
+        logger.warning("[VT-domain] VirusTotal rate limited (429) for domain=%s", domain)
+        availability_flags["virustotal"] = False
+        return None
+    if resp.status_code == 404:
+        logger.debug("[VT-domain] VirusTotal: no data found for domain=%s", domain)
+        return None
+    if resp.status_code != 200:
+        logger.warning(
+            "[VT-domain] VirusTotal unexpected status=%d for domain=%s",
+            resp.status_code, domain,
+        )
+        availability_flags["virustotal"] = False
+        return None
+
+    try:
+        data = resp.json()
+        stats = data["data"]["attributes"]["last_analysis_stats"]
+        malicious_count = stats.get("malicious", 0)
+        suspicious_count = stats.get("suspicious", 0)
+        total = sum(stats.values())
+
+        logger.info(
+            "[VT-domain] Result: domain=%s malicious=%d suspicious=%d total_engines=%d",
+            domain, malicious_count, suspicious_count, total,
+        )
+
+        if malicious_count > 0:
+            return Signal(
+                name="VirusTotal: Malicious Domain",
+                category="domain",
+                severity="critical",
+                description=(
+                    f"{malicious_count} out of {total} security engines flagged the sender "
+                    f"domain \'{domain}\' as malicious."
+                ),
+                value=f"{domain}: {malicious_count}/{total} engines flagged malicious",
+                points=20,
+            )
+        elif suspicious_count > 0:
+            return Signal(
+                name="VirusTotal: Suspicious Domain",
+                category="domain",
+                severity="high",
+                description=(
+                    f"{suspicious_count} out of {total} security engines flagged the sender "
+                    f"domain \'{domain}\' as suspicious."
+                ),
+                value=f"{domain}: {suspicious_count}/{total} engines flagged suspicious",
+                points=10,
+            )
+    except (KeyError, ValueError) as exc:
+        logger.warning("[VT-domain] Response parse error for domain=%s: %s", domain, exc)
+
+    logger.info("[VT-domain] No reputation flags for domain=%s", domain)
+    return None
 
 
 def _extract_domain(sender: str) -> Optional[str]:
@@ -95,6 +189,13 @@ async def analyze_domain_age(
     if not domain:
         parse_warnings.append(f"Could not extract sender domain for WHOIS lookup: {sender!r}")
         return signals, parse_warnings
+
+    logger.info("Domain extracted from sender %r → %s", sender, domain)
+
+    # ---- VirusTotal domain reputation check ----
+    vt_signal = await _check_virustotal_domain(domain, availability_flags)
+    if vt_signal:
+        signals.append(vt_signal)
 
     # ---- Cache lookup (Decision D3) ----
     if domain in domain_cache:

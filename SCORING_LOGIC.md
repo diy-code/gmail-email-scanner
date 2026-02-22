@@ -113,7 +113,7 @@ Parses the `Authentication-Results` header and the `From` / `Reply-To` fields.
 
 ### 2.2 URL Intelligence (`urls.py`)
 
-**Category**: `url` · **Cap**: 55 pts · **I/O**: VirusTotal API, Google Safe Browsing API
+**Category**: `url` · **Cap**: 40 pts · **I/O**: VirusTotal API, Google Safe Browsing API
 
 Analyzes up to 10 pre-extracted URLs from the email body.
 

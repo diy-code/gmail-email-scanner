@@ -14,6 +14,34 @@ Build a Gmail Add-on (Apps Script via `clasp`) that sends email data to a FastAP
 
 ---
 
+## Plan Governance (Single Source of Truth)
+
+`PLAN.md` is the **only source of truth** for architecture, scope, implementation order, and technical decisions.
+
+- If `ASSIGNMENT.md` and `PROJECT_OUTLINE.md` differ from this file, this file wins.
+- Any design/implementation change must first be updated here.
+- Interview narrative and execution should always align to this document.
+
+---
+
+## Non-Production Risk Awareness (Intentional)
+
+This project is a **home assignment demo**, not a production SOC product. The implementation is intentionally scoped for interview impact and engineering clarity.
+
+Known risks (acknowledged, not fully mitigated in MVP):
+- External API dependency and rate-limit fragility (VirusTotal, WHOIS, AbuseIPDB)
+- Potential false positives/false negatives in heuristic checks
+- Simplified authentication (`X-API-Key`) instead of per-user identity verification
+- Limited privacy controls compared to production-grade data governance
+- **Email data sent to OpenAI:** Signal summaries and short body excerpts (e.g., urgency phrases) are included in the GPT-4o prompt to generate the AI explanation. In a production system this would require user consent, data-processing agreements, and the option to disable AI narration. For this demo, the trade-off is accepted to showcase the explainability feature.
+
+How this is presented in interview:
+- Explicitly state these risks as conscious trade-offs
+- Show graceful degradation paths instead of pretending full production hardening
+- Demonstrate clear upgrade path for productionization
+
+---
+
 ## Project Structure
 
 ```
@@ -89,11 +117,26 @@ class Signal(BaseModel):
     value: Optional[str]                   # the raw value that triggered it (e.g. "2 days old")
     points: int                            # weight contributed to score
 
+class EvidenceItem(BaseModel):
+    signal: str                            # signal name
+    source: str                            # e.g. "Authentication-Results", "VirusTotal"
+    raw_value: str                         # e.g. "dmarc=fail", "malicious=14"
+    points: int                            # points added by this evidence
+
+class ScoringBreakdown(BaseModel):
+    total_points: int
+    max_points: int
+    formula: str                           # e.g. "score=min(100, round(total/max*100))"
+    category_points: dict[str, int]        # header/url/ip/domain -> points
+
 class AnalyzeResponse(BaseModel):
     score: int                             # 0–100
     verdict: str                           # "SAFE" | "SUSPICIOUS" | "MALICIOUS"
+    confidence: int                        # 0–100 confidence badge
     signals: list[Signal]                  # all signals that fired
     top_contributors: list[Signal]         # top 3 by points
+    evidence: list[EvidenceItem]           # auditable reason log
+    scoring_breakdown: ScoringBreakdown    # exact arithmetic trace
     explanation: str                       # GPT-4o narrative
     analysis_time_ms: int
 ```
@@ -134,7 +177,7 @@ dmarc=fail → FAIL (15 points)
 
 | Signal | Points | API |
 |---|---|---|
-| URL flagged malicious | 20 | VirusTotal — `POST /api/v3/urls`, check `positives` count |
+| URL flagged malicious | 20 | VirusTotal — `POST /api/v3/urls`, check `last_analysis_stats.malicious` |
 | URL flagged phishing | 20 | Google Safe Browsing — `POST /v4/threatMatches:find` (batch all URLs) |
 | URL shortener detected | 5 | Regex match against list: bit.ly, tinyurl, t.co, ow.ly, goo.gl, etc. |
 | Typosquatted domain | 10 | Levenshtein distance ≤ 2 vs. top 50 brand domains |
@@ -142,6 +185,11 @@ dmarc=fail → FAIL (15 points)
 **VirusTotal rate limit mitigation:** Scan max 3 unique domains per email. Cache domain → verdict in a simple dict. Skip gracefully if rate-limited (429 response).
 
 **Brand list for typosquatting:** paypal, amazon, microsoft, google, apple, netflix, linkedin, facebook, instagram, twitter, wellsfargo, chase, bankofamerica, dropbox, docusign, etc.
+
+API resiliency concerns (must be implemented):
+- On `429`/timeout from VirusTotal, mark signal as `unknown` and continue analysis
+- Per-signal timeout budget (e.g., 2–3s) to protect add-on 30s total limit
+- Partial-failure mode: return score from available signals + lower confidence
 
 ### 2.3 — IP Reputation (`signal_engine/ip_reputation.py`)
 
@@ -166,14 +214,35 @@ Regex: `\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]` on the last `Received` header.
 
 Extract sender domain from the `From` header email address. Cache results — WHOIS is slow (~1–3s) and rarely needed more than once per domain per session.
 
+### 2.5 — Header/IP Parsing Concerns (Reliability Rules)
+
+Known parsing concerns:
+- `Received` chains vary by provider and can contain private/internal IPs
+- `Authentication-Results` formatting differs across MTAs
+- Some emails miss one or more expected headers
+
+Reliability rules:
+- Ignore private/reserved IP ranges when deriving sender reputation target
+- Prefer earliest external hop over naive "last header" assumption
+- Treat missing/ambiguous parse as `unknown`, not `pass`
+- Add `parse_warnings[]` to internal diagnostics and observability logs
+
 ---
 
 ## Phase 3 — Scoring Engine (`scoring.py`)
 
 ```
-Total possible points: 150
+Total possible points: 150 (with category caps)
 
-final_score = min(100, round(sum(triggered_points) / 150 * 100))
+category_caps = {
+  header: 45,
+  url: 55,
+  ip: 20,
+  domain: 20,
+  behavior: 10
+}
+
+final_score = min(100, round(capped_points / capped_max_points * 100))
 
 Verdict thresholds:
   0  – 30  → SAFE        (green  #34a853)
@@ -182,6 +251,43 @@ Verdict thresholds:
 ```
 
 **Top 3 contributors:** sort triggered signals by `points` descending, take first 3. These are what the UI surface prominently.
+
+### Confidence Badge (required)
+
+The UI must show `Confidence: X%` next to score.
+
+```
+confidence starts at 100
+- 20 if VirusTotal unavailable
+- 15 if Safe Browsing unavailable
+- 10 if AbuseIPDB unavailable
+- 10 if WHOIS unavailable
+- 10 if critical parsing ambiguity detected
+
+confidence = max(0, min(100, confidence))
+```
+
+Confidence levels:
+- 80–100: High
+- 50–79: Medium
+- 0–49: Low
+
+### Explainability Contract (backing up “60% risk”)
+
+For every score, backend must return:
+- exact formula used
+- points by category
+- full evidence items (`source`, `raw_value`, `points`)
+- top contributors list used by UI
+
+Example (score = 60):
+- SPF fail = +15 (`Authentication-Results: spf=fail`)
+- Domain age 5 days = +20 (WHOIS)
+- URL shortener = +5 (regex)
+- AbuseIPDB confidence 40 = +12
+- Total = 52/87 effective capped max => 60
+
+This makes every verdict auditable with clear logic and data.
 
 ---
 
@@ -214,6 +320,15 @@ Explain why this email is dangerous.
 - Temperature: `0.3` (deterministic, consistent)
 - Max tokens: `200`
 - Fallback: if OpenAI call fails → generate template string from top 3 signals (no crash)
+
+### Privacy trade-off (acknowledged)
+The AI prompt includes signal summaries and may reference short excerpts from the email body (e.g., urgency phrases) to produce a specific, actionable explanation. This means partial email content is sent to OpenAI's API.
+
+This is a **conscious demo trade-off**: the explainability quality gained outweighs the privacy cost in a non-production context. In a production deployment, the mitigation path would be:
+- Offer a user-facing toggle to disable AI narration entirely
+- Strip all PII before prompt construction (replace names/emails with placeholders)
+- Use an on-premise or self-hosted LLM to keep data in-boundary
+- Add a data-processing agreement with the AI provider
 
 ---
 
@@ -331,6 +446,7 @@ function callAnalyzeEndpoint(payload) {
 │  subject line...                │
 ├─────────────────────────────────┤
 │  [MALICIOUS badge image]  84/100│
+│  Confidence: 78% (Medium)       │
 │  ████████████             score│
 ├─────────────────────────────────┤
 │  ⚠ SPF Fail     · Domain unauth│
@@ -350,6 +466,11 @@ function callAnalyzeEndpoint(payload) {
 **Error card** (if backend is down or times out):
 - Shows a clean "Analysis unavailable" message
 - Never crashes — `muteHttpExceptions: true` in the fetch call
+
+Add-on event concerns (must verify early):
+- Validate actual `e` payload keys for contextual trigger vs action callback
+- Build a one-time internal debug card to print event keys during setup
+- If a required key is absent, show explicit setup guidance card
 
 ---
 
@@ -384,6 +505,34 @@ function setup() {
 }
 ```
 
+### 6.1 — Observability & Auditability (highest priority)
+
+Goal: every analysis must be explainable and traceable end-to-end.
+
+Backend observability requirements:
+- Generate `request_id` per analysis
+- Structured logs (JSON) for each stage: parse, enrichment, scoring, explanation
+- Per-signal latency metrics (`signal_latency_ms`) and overall `analysis_time_ms`
+- Per-signal status (`ok`, `timeout`, `rate_limited`, `error`, `unknown`)
+- Include `request_id` in API response so UI and logs can be correlated
+
+Minimum log schema:
+```
+{
+  "request_id": "uuid",
+  "message_hash": "sha256(subject+sender+date)",
+  "stage": "scoring",
+  "score": 60,
+  "confidence": 78,
+  "category_points": {"header": 15, "url": 5, "ip": 12, "domain": 20},
+  "signal_status": {"virustotal": "ok", "abuseipdb": "ok", "whois": "ok"},
+  "analysis_time_ms": 4230
+}
+```
+
+Interview framing:
+- "If I claim 60% risk, I can show exactly which data produced 60, how much each signal contributed, and the confidence level based on data availability."
+
 ---
 
 ## Phase 7 — Testing & Demo Prep
@@ -400,11 +549,13 @@ Find real phishing samples at: **PhishTank** (phishtank.org), **OpenPhish** (ope
 
 ### End-to-end checklist
 - [ ] All 3 test emails show correct verdict
+- [ ] Score, confidence, and evidence log are internally consistent
 - [ ] AI explanation is specific and reads naturally
 - [ ] Signal breakdown shows correct top 3 contributors
 - [ ] Error card shows cleanly if backend is unreachable
 - [ ] Total latency < 20 seconds (add-on execution limit is 30s)
 - [ ] Re-analyze same email → consistent result
+- [ ] Logs include `request_id`, per-signal status, and timing
 
 ### Demo day protocol
 1. Hit `/health` endpoint 60 seconds before interview starts (warm up Cloud Run)
@@ -419,13 +570,30 @@ Find real phishing samples at: **PhishTank** (phishtank.org), **OpenPhish** (ope
 
 ### README structure
 1. **What it does** — one paragraph, non-technical
-2. **Architecture diagram** (copy from `PROJECT_OUTLINE.md`)
+2. **Architecture diagram** (copy from this file: `PLAN.md`)
 3. **API contract** — request/response shape
 4. **Implemented features** — checklist vs. the 8 capabilities in the assignment
 5. **External APIs used** — VirusTotal, Safe Browsing, AbuseIPDB, OpenAI, WHOIS
 6. **Design decisions** — why each major choice was made
 7. **Limitations** — VirusTotal rate limit, no attachment analysis, no history
 8. **Future work** — blacklist, history, management console, attachment sandbox
+9. **Risk awareness** — explicitly list non-production trade-offs and concerns
+10. **Observability model** — request_id, scoring breakdown, confidence computation
+
+### Unit Testing Strategy (must-have)
+
+Backend tests (`pytest`) required before demo:
+- `test_scoring_math.py`: verifies formula, caps, thresholds, and deterministic results
+- `test_confidence_math.py`: verifies confidence degradation rules for missing signals
+- `test_header_parser.py`: SPF/DKIM/DMARC parse cases including malformed headers
+- `test_received_parser.py`: IP extraction and private-IP filtering edge cases
+- `test_url_engine.py`: VirusTotal/Safe Browsing response mapping + 429 handling
+- `test_api_contract.py`: response always includes `score`, `confidence`, `evidence`, `scoring_breakdown`
+
+Minimum quality gate:
+- All scoring and parsing tests pass
+- No release/demo run without passing test suite
+- If a parser test fails, affected signal must default to `unknown` and reduce confidence
 
 ### Git commit order (tells the spec-first story)
 ```
@@ -437,8 +605,10 @@ commit 5: "Add AI explanation layer (GPT-4o)"
 commit 6: "Scaffold FastAPI app and /analyze endpoint"
 commit 7: "Write Dockerfile and Cloud Run config"
 commit 8: "Build Gmail add-on — Code.gs, Cards.gs, Api.gs, manifest"
-commit 9: "Deploy to Cloud Run, end-to-end testing"
-commit 10: "Write README, final polish"
+commit 9: "Add observability: request IDs, structured logs, signal timing"
+commit 10: "Add unit tests: scoring, parsing, confidence, API contract"
+commit 11: "Deploy to Cloud Run, end-to-end testing"
+commit 12: "Write README, final polish"
 ```
 
 ---

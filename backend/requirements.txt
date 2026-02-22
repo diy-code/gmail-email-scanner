@@ -1,0 +1,14 @@
+# Phase 0 — Backend dependencies
+# Runtime: Python 3.12
+# Deployed on: Google Cloud Run
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+httpx==0.27.2
+pydantic==2.9.2
+pydantic-settings==2.5.2   # BaseSettings for env-var config (Decision D2)
+python-whois==0.9.3
+openai==1.51.0
+slowapi==0.1.9              # Rate limiting (Decision D4)
+rapidfuzz==3.9.7            # Levenshtein for typosquatting (Decision D5)
+# Note: request IDs use stdlib uuid — no extra package needed
